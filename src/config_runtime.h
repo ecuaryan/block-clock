@@ -542,7 +542,7 @@ static float readBatteryVoltage() {
 }
 
 static bool syncClockFromNtp(uint16_t timeoutMs = NTP_SYNC_TIMEOUT_MS) {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  configTzTime("MST7MDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
   uint32_t start = millis();
   time_t now = time(nullptr);
   while (now < 1700000000 && (millis() - start) < timeoutMs) {
@@ -557,6 +557,6 @@ static String formatTimestamp(time_t when) {
   struct tm tmValue = {};
   if (!localtime_r(&when, &tmValue)) return "---";
   char buffer[28];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M UTC", &tmValue);
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M %Z", &tmValue);
   return String(buffer);
 }
