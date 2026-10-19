@@ -1,5 +1,13 @@
 #pragma once
 
+#if defined(ARDUINO)
+#include <Fonts/FreeSans24pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+#else
+static const GFXfont FreeSans24pt7b = { false };
+static const GFXfont FreeSansBold24pt7b = { true };
+#endif
+
 static constexpr int NO_WIFI_ICON_W = 14;
 static constexpr int NO_WIFI_ICON_H = 12;
 
@@ -265,6 +273,79 @@ static void drawCenteredDashboardText(const char* text, int centerX, int y, int 
   display.print(text ? text : "");
 }
 
+static void drawCenteredPriceText(const char* text, int centerX, int baselineY) {
+  if (text && text[0] == '$' && text[1] != '\0') {
+  int16_t boundsX = 0;
+  int16_t boundsY = 0;
+  uint16_t boundsW = 0;
+  uint16_t boundsH = 0;
+
+    display.setFont(&FreeSans24pt7b);
+    display.setTextSize(1);
+    display.getTextBounds("$", 0, 0, &boundsX, &boundsY, &boundsW, &boundsH);
+    const int dollarWidth = boundsW;
+    const int dollarOffset = boundsX;
+
+    int16_t amountBoundsX = 0;
+    int16_t amountBoundsY = 0;
+    uint16_t amountBoundsW = 0;
+    uint16_t amountBoundsH = 0;
+  display.setFont(&FreeSansBold24pt7b);
+    display.getTextBounds(text + 1, 0, 0, &amountBoundsX, &amountBoundsY, &amountBoundsW, &amountBoundsH);
+  static constexpr int DOLLAR_AMOUNT_GAP = 4;
+  const int groupWidth = dollarWidth + DOLLAR_AMOUNT_GAP + amountBoundsW;
+    const int groupLeft = centerX - (groupWidth / 2);
+
+    display.setFont(&FreeSans24pt7b);
+    display.setCursor(groupLeft - dollarOffset, baselineY);
+    display.print("$");
+    display.setFont(&FreeSansBold24pt7b);
+    display.setCursor(groupLeft + dollarWidth + DOLLAR_AMOUNT_GAP - amountBoundsX, baselineY);
+    display.print(text + 1);
+  } else {
+    int16_t boundsX = 0;
+    int16_t boundsY = 0;
+    uint16_t boundsW = 0;
+    uint16_t boundsH = 0;
+    display.setFont(&FreeSansBold24pt7b);
+    display.setTextSize(1);
+    display.getTextBounds(text ? text : "", 0, 0, &boundsX, &boundsY, &boundsW, &boundsH);
+    display.setCursor(centerX - ((int)boundsW / 2) - boundsX, baselineY);
+    display.print(text ? text : "");
+  }
+  display.setFont();
+  display.setTextSize(1);
+}
+
+static void formatPriceWithCommas(const char* value, char* output, size_t outputSize) {
+  if (!output || outputSize == 0) return;
+  output[0] = '\0';
+  if (!value) return;
+
+  size_t integerDigits = 0;
+  for (const char* cursor = value; *cursor && *cursor != '.'; cursor++) {
+    if (*cursor >= '0' && *cursor <= '9') integerDigits++;
+  }
+
+  const char* decimalPoint = strchr(value, '.');
+  size_t written = 0;
+  size_t seenDigits = 0;
+  for (const char* cursor = value; *cursor && written < outputSize - 1; cursor++) {
+    if (*cursor == ',') continue;
+    if (*cursor >= '0' && *cursor <= '9') {
+      if (!decimalPoint || cursor < decimalPoint) {
+        if (seenDigits > 0 && (integerDigits - seenDigits) % 3 == 0) {
+          if (written >= outputSize - 1) break;
+          output[written++] = ',';
+        }
+        seenDigits++;
+      }
+    }
+    output[written++] = *cursor;
+  }
+  output[written] = '\0';
+}
+
 static uint8_t feeLabelGlyphRow(char character, int row) {
   static const uint8_t glyphs[26][7] = {
     { 14, 17, 17, 31, 17, 17, 17 }, { 30, 17, 17, 30, 17, 17, 30 },
@@ -308,12 +389,13 @@ static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg) {
   prepareScreen(themeMode);
 
   const int centerX = DEVICE_DISPLAY_WIDTH / 2;
+  char groupedPrice[32];
   char priceText[24];
+  formatPriceWithCommas(data.priceValue, groupedPrice, sizeof(groupedPrice));
   const char* currencyPrefix = cfg.currencyCode == CURRENCY_USD ? "$" : currencyCodeLabel(cfg.currencyCode);
   const char* currencySeparator = cfg.currencyCode == CURRENCY_USD ? "" : " ";
-  snprintf(priceText, sizeof(priceText), "%s%s%s", currencyPrefix, currencySeparator, data.priceValue);
-  const int priceSize = fitTextSizeForWidth(priceText, DEVICE_DISPLAY_WIDTH - 24, 6);
-  drawCenteredDashboardText(priceText, centerX, 3, priceSize);
+  snprintf(priceText, sizeof(priceText), "%s%s%s", currencyPrefix, currencySeparator, groupedPrice);
+  drawCenteredPriceText(priceText, centerX, 41);
 
   const time_t nowT = time(nullptr);
   const String timestamp = formatTimestamp(nowT >= 1700000000 ? nowT : data.updatedAt);

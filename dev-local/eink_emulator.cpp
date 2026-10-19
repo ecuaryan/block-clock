@@ -11,6 +11,10 @@
 
 using String = std::string;
 
+struct GFXfont {
+  bool bold;
+};
+
 class IPAddress {
 public:
   IPAddress(int, int, int, int) {}
@@ -72,6 +76,17 @@ public:
   void clearMemory() { elements.clear(); }
   void setTextColor(uint16_t foreground, uint16_t) { textColor = foreground; }
   void setTextSize(int size) { textSize = std::max(1, size); }
+  void setFont(const void* font = nullptr) {
+    customFont = font != nullptr;
+    customBold = font && static_cast<const GFXfont*>(font)->bold;
+  }
+  void getTextBounds(const char* text, int16_t, int16_t, int16_t* boundsX, int16_t* boundsY,
+                     uint16_t* boundsW, uint16_t* boundsH) const {
+    if (boundsX) *boundsX = 0;
+    if (boundsY) *boundsY = customFont ? -35 : -8;
+    if (boundsW) *boundsW = (uint16_t)(text ? std::strlen(text) * (customFont ? 26 : 6 * textSize) : 0);
+    if (boundsH) *boundsH = customFont ? 42 : (uint16_t)(8 * textSize);
+  }
   void setCursor(int x, int y) { cursorX = x; cursorY = y; }
   void fastmodeOn(bool) {}
   void fastmodeOff() {}
@@ -112,12 +127,15 @@ public:
   void print(const char* text) {
     if (!text) return;
     std::ostringstream element;
-    element << "<text x=\"" << cursorX << "\" y=\"" << cursorY + 8 * textSize
-            << "\" fill=\"" << svgColor(textColor) << "\" font-family=\"monospace\""
-            << " font-size=\"" << 10 * textSize << "\" xml:space=\"preserve\">"
+        element << "<text x=\"" << cursorX << "\" y=\""
+          << (customFont ? cursorY : cursorY + 8 * textSize)
+          << "\" fill=\"" << svgColor(textColor) << "\" font-family=\""
+          << (customFont ? "Arial, Helvetica, sans-serif" : "monospace") << "\""
+          << (customBold ? " font-weight=\"bold\"" : "")
+          << " font-size=\"" << (customFont ? 42 : 10 * textSize) << "\" xml:space=\"preserve\">"
             << escapeXml(text) << "</text>";
     elements.push_back(element.str());
-              cursorX += (int)std::strlen(text) * 6 * textSize;
+        cursorX += (int)std::strlen(text) * (customFont ? 26 : 6 * textSize);
   }
 
   void print(const String& text) { print(text.c_str()); }
@@ -144,6 +162,8 @@ private:
   int cursorY = 0;
   int textSize = 1;
   uint16_t textColor = BLACK;
+  bool customFont = false;
+  bool customBold = false;
 };
 
 static SvgDisplay display;
