@@ -1,3 +1,4 @@
 .DS_Store
 secrets.h
-dev-local/
+dev-local/.build/
+dev-local/eink-screens/

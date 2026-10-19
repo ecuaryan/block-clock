@@ -350,6 +350,10 @@ static BlockData emptyBlockData() {
   safeCopyCString(data.blocksToHalving, sizeof(data.blocksToHalving), "--");
   safeCopyCString(data.priceValue, sizeof(data.priceValue), "--");
   safeCopyCString(data.hashrateEhs, sizeof(data.hashrateEhs), "--");
+  data.lowFeeSatVb = -1.0f;
+  data.mediumFeeSatVb = -1.0f;
+  data.highFeeSatVb = -1.0f;
+  data.lastBlockTimestamp = 0;
   data.batteryVoltage = 0.0f;
   data.batteryPercent = -1;
   data.updatedAt = 0;
@@ -557,6 +561,6 @@ static String formatTimestamp(time_t when) {
   struct tm tmValue = {};
   if (!localtime_r(&when, &tmValue)) return "---";
   char buffer[28];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M %Z", &tmValue);
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %I:%M %p", &tmValue);
   return String(buffer);
 }

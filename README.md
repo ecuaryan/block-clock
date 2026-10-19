@@ -23,7 +23,8 @@ Both boards use the same source code. The firmware selects the right display dri
 - Blocks remaining to the next halving
 - BTC price in USD, EUR, CHF, GBP, CAD, or AUD
 - Network hashrate in EH/s
-- Battery icon with optional percentage
+- Recommended low, medium, and high transaction fees in sat/vB
+- Minutes since the latest Bitcoin block
 - Wi-Fi offline icon when the last fetch failed
 - Last update time
 - Light or dark display theme
@@ -39,6 +40,7 @@ Block Clock has two data modes.
 - block height
 - BTC price in the selected currency (CoinGecko as fallback)
 - network hashrate in EH/s
+- recommended transaction fees and latest block timestamp from mempool.space
 - halving countdown calculated locally from block height
 
 **MQTT mode** is for people who already publish Bitcoin data on their local network, for example from a Bitcoin node or Home Assistant. Use retained MQTT messages so the clock can wake, read the latest values, refresh the display, and sleep again.
@@ -149,7 +151,7 @@ Normal setup happens through the browser page. If you want local defaults for de
 
 The native emulator renders the firmware screen code to SVG, so you can review layouts before uploading to a board.
 
-Generate the default screen set for E290 and E213:
+Generate the default screen set for E290:
 
 ```sh
 ./dev-local/generate_eink_screens.sh

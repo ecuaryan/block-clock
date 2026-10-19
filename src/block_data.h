@@ -185,14 +185,55 @@ static bool fetchOnlineHashrate(BlockData& outData) {
   return true;
 }
 
+static void fetchOnlinePreciseFees(BlockData& outData) {
+  String payload;
+  if (!httpGetString(MEMPOOL_PRECISE_FEES_URL, payload)) return;
+
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, payload)) return;
+  if (doc["hourFee"].is<float>() || doc["hourFee"].is<int>()) {
+    outData.lowFeeSatVb = doc["hourFee"].as<float>();
+  }
+  if (doc["halfHourFee"].is<float>() || doc["halfHourFee"].is<int>()) {
+    outData.mediumFeeSatVb = doc["halfHourFee"].as<float>();
+  }
+  if (doc["fastestFee"].is<float>() || doc["fastestFee"].is<int>()) {
+    outData.highFeeSatVb = doc["fastestFee"].as<float>();
+  }
+}
+
+static void fetchOnlineLastBlockTimestamp(BlockData& outData) {
+  if (!hasText(outData.blockHeight) || !isUsefulDataValue(outData.blockHeight)) return;
+
+  String hashUrl = MEMPOOL_BLOCK_HASH_URL_PREFIX;
+  hashUrl += outData.blockHeight;
+  String blockHash;
+  if (!httpGetString(hashUrl.c_str(), blockHash)) return;
+
+  String blockUrl = MEMPOOL_BLOCK_URL_PREFIX;
+  blockUrl += blockHash;
+  String payload;
+  if (!httpGetString(blockUrl.c_str(), payload)) return;
+
+  StaticJsonDocument<64> filter;
+  filter["timestamp"] = true;
+  StaticJsonDocument<128> doc;
+  if (deserializeJson(doc, payload, DeserializationOption::Filter(filter)) || !doc["timestamp"].is<time_t>()) return;
+  const time_t blockTimestamp = doc["timestamp"].as<time_t>();
+  if (blockTimestamp > 0) outData.lastBlockTimestamp = blockTimestamp;
+}
+
 static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {
   bool ok = false;
-  ok = fetchOnlineHeight(outData) || ok;
+  const bool heightOk = fetchOnlineHeight(outData);
+  ok = heightOk || ok;
   ok = fetchOnlineHashrate(outData) || ok;
   if (!fetchMempoolPrice(cfg, outData)) {
     ok = fetchCoinGeckoPrice(cfg, outData) || ok;
   } else {
     ok = true;
   }
+  fetchOnlinePreciseFees(outData);
+  if (heightOk) fetchOnlineLastBlockTimestamp(outData);
   return ok;
 }
