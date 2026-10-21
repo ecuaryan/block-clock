@@ -181,12 +181,14 @@ static String portalPage() {
   html += F("<option value=\"1\""); html += selectedAttr(sanitizeThemeMode(deviceConfig.displayThemeMode) == DISPLAY_THEME_DARK); html += F(">Dark</option>");
   html += F("<option value=\"0\""); html += selectedAttr(sanitizeThemeMode(deviceConfig.displayThemeMode) == DISPLAY_THEME_LIGHT); html += F(">Light</option>");
   html += F("</select></div><div>");
-  html += F("<label for=\"battery_pct\">Battery percentage</label>");
-  html += F("<select id=\"battery_pct\" name=\"battery_pct\"><option value=\"0\"");
-  html += selectedAttr(!deviceConfig.showBatteryPercent);
-  html += F(">Off</option><option value=\"1\"");
-  html += selectedAttr(deviceConfig.showBatteryPercent);
-  html += F(">On</option></select></div><div>");
+  html += F("<label for=\"battery_mode\">Battery indicator</label>");
+  html += F("<select id=\"battery_mode\" name=\"battery_mode\"><option value=\"0\"");
+  html += selectedAttr(deviceConfig.batteryDisplayMode == BATTERY_DISPLAY_HIDDEN);
+  html += F(">Hidden</option><option value=\"1\"");
+  html += selectedAttr(deviceConfig.batteryDisplayMode == BATTERY_DISPLAY_ICON);
+  html += F(">Icon only</option><option value=\"2\"");
+  html += selectedAttr(deviceConfig.batteryDisplayMode == BATTERY_DISPLAY_ICON_PERCENT);
+  html += F(">Icon + percentage</option></select></div><div>");
   html += F("<label for=\"refresh_interval_value\">Refresh interval</label><div class=\"dual\"><input id=\"refresh_interval_value\" name=\"refresh_interval_value\" type=\"text\" inputmode=\"numeric\" pattern=\"[0-9]*\" min=\"1\" step=\"1\" value=\"");
   html += String(refreshValue);
   html += F("\"><select id=\"refresh_interval_unit\" name=\"refresh_interval_unit\"><option value=\"0\"");
@@ -318,7 +320,7 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
     MIN_REFRESH_INTERVAL_MINUTES,
     MAX_REFRESH_INTERVAL_MINUTES
   );
-  cfg.showBatteryPercent = portalServer.arg("battery_pct") != "0";
+  cfg.batteryDisplayMode = (uint8_t)clampInt(portalServer.arg("battery_mode").toInt(), BATTERY_DISPLAY_HIDDEN, BATTERY_DISPLAY_ICON_PERCENT);
   safeCopyString(cfg.mqttServer, sizeof(cfg.mqttServer), portalServer.arg("mqtt_server"));
   cfg.mqttPort = parsePort(portalServer.arg("mqtt_port"), DEFAULT_MQTT_PORT);
   safeCopyString(cfg.mqttUser, sizeof(cfg.mqttUser), portalServer.arg("mqtt_user"));

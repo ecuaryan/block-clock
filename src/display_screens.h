@@ -8,8 +8,17 @@ static const GFXfont FreeSans24pt7b = { false };
 static const GFXfont FreeSansBold24pt7b = { true };
 #endif
 
+static constexpr int BATTERY_BODY_W = 20;
+static constexpr int BATTERY_BODY_H = 10;
+static constexpr int BATTERY_TIP_W = 1;
+static constexpr int BATTERY_TIP_H = 5;
+static constexpr int BATTERY_RIGHT_MARGIN = 3;
+static constexpr int BATTERY_TEXT_GAP = 2;
+static constexpr int BATTERY_ICON_Y = 3;
+static constexpr int BATTERY_TEXT_Y = 5;
 static constexpr int NO_WIFI_ICON_W = 14;
 static constexpr int NO_WIFI_ICON_H = 12;
+static constexpr int STATUS_ICON_GAP = 5;
 
 // Partial-refresh window state. When active, prepareScreen uses fillRect
 // (keeping the existing panel image outside the window) so display.fastmodeOn()
@@ -70,16 +79,84 @@ static void drawNoWifiStatusIcon(int x, int y, uint16_t color, uint16_t backgrou
   display.drawLine(x + 2, y + 1, x + 11, y + 10, color);
 }
 
-static void drawNoWifiStatus(DisplayThemeMode themeMode) {
+static void drawNoWifiStatusLeftOfBattery(int batteryIconX, DisplayThemeMode themeMode) {
   const DisplayThemeColors theme = getDisplayThemeColors(themeMode);
-  const int iconX = DEVICE_DISPLAY_WIDTH - NO_WIFI_ICON_W - 3;
-  drawNoWifiStatusIcon(iconX, 2, theme.foreground, theme.background);
+  const int iconX = batteryIconX - STATUS_ICON_GAP - NO_WIFI_ICON_W;
+  if (iconX < 1) return;
+  drawNoWifiStatusIcon(iconX, BATTERY_ICON_Y - 1, theme.foreground, theme.background);
 }
 
 static void drawBlockClockMark(int x, int y, int size, uint16_t color = BLACK, uint16_t background = WHITE) {
   const int wall = size >= 20 ? 4 : 3;
   display.fillRect(x, y, size, size, color);
   display.fillRect(x + wall, y + wall, size - (wall * 2), size - (wall * 2), background);
+}
+
+static int estimateTextWidthSize1(const char* text) {
+  return text ? (int)strlen(text) * 6 : 0;
+}
+
+static void drawBatteryIcon(
+  int x,
+  int y,
+  int pct,
+  int bodyW,
+  int bodyH,
+  int tipW,
+  int tipH,
+  DisplayThemeMode themeMode = DISPLAY_THEME_LIGHT
+) {
+  const DisplayThemeColors theme = getDisplayThemeColors(themeMode);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+
+  const int pad = (bodyW >= 28) ? 3 : 2;
+
+  display.drawRoundRect(x, y, bodyW, bodyH, 3, theme.foreground);
+  display.fillRect(x + bodyW, y + (bodyH - tipH) / 2, tipW, tipH, theme.foreground);
+
+  const int innerX = x + pad;
+  const int innerY = y + pad;
+  const int innerW = bodyW - (pad * 2);
+  const int innerH = bodyH - (pad * 2);
+
+  display.fillRect(innerX, innerY, innerW, innerH, theme.background);
+
+  int fillW = (innerW * pct) / 100;
+  if (fillW > 0) {
+    display.fillRect(innerX, innerY, fillW, innerH, theme.foreground);
+  }
+}
+
+static int drawBatteryStatus(int batteryPct, uint8_t mode, DisplayThemeMode themeMode) {
+  // Hidden: draw nothing, but report an icon position so the Wi-Fi icon still sits at the edge.
+  if (mode == BATTERY_DISPLAY_HIDDEN) return DEVICE_DISPLAY_WIDTH - BATTERY_RIGHT_MARGIN + STATUS_ICON_GAP;
+
+  int iconX;
+  if (mode == BATTERY_DISPLAY_ICON_PERCENT && batteryPct >= 0) {
+    char pctText[8];
+    snprintf(pctText, sizeof(pctText), "%d%%", clampInt(batteryPct, 0, 100));
+    const int textW = estimateTextWidthSize1(pctText);
+    const int textX = DEVICE_DISPLAY_WIDTH - BATTERY_RIGHT_MARGIN - textW;
+    iconX = textX - BATTERY_TEXT_GAP - BATTERY_BODY_W - BATTERY_TIP_W;
+    display.setTextSize(1);
+    display.setCursor(textX, BATTERY_TEXT_Y);
+    display.print(pctText);
+  } else {
+    iconX = DEVICE_DISPLAY_WIDTH - BATTERY_RIGHT_MARGIN - BATTERY_BODY_W - BATTERY_TIP_W;
+  }
+
+  drawBatteryIcon(
+    iconX,
+    BATTERY_ICON_Y,
+    batteryPct >= 0 ? batteryPct : 0,
+    BATTERY_BODY_W,
+    BATTERY_BODY_H,
+    BATTERY_TIP_W,
+    BATTERY_TIP_H,
+    themeMode
+  );
+  return iconX;
 }
 
 static void drawTitleLine(const char* title, int x, int y, int textSize, DisplayThemeMode themeMode = statusScreenThemeMode()) {
@@ -471,8 +548,9 @@ static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg) {
     drawCenteredDashboardText(feeValues[index], columnCenter, 110, 2);
   }
 
+  const int batteryIconX = drawBatteryStatus(data.batteryPercent, cfg.batteryDisplayMode, themeMode);
   if (!data.wifiOk) {
-    drawNoWifiStatus(themeMode);
+    drawNoWifiStatusLeftOfBattery(batteryIconX, themeMode);
   }
 
   display.update();

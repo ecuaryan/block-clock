@@ -237,6 +237,7 @@ static void normalizeDeviceConfig(DeviceConfig& cfg) {
   cfg.dataSourceMode = (uint8_t)sanitizeDataSourceMode(cfg.dataSourceMode);
   cfg.currencyCode = (uint8_t)sanitizeCurrencyCode(cfg.currencyCode);
   cfg.timezoneIndex = sanitizeTimezoneIndex(cfg.timezoneIndex);
+  if (cfg.batteryDisplayMode > BATTERY_DISPLAY_ICON_PERCENT) cfg.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
   cfg.displayThemeMode = (uint8_t)sanitizeThemeMode(cfg.displayThemeMode);
   cfg.refreshIntervalMinutes = (uint16_t)clampInt(
     (int)cfg.refreshIntervalMinutes,
@@ -261,7 +262,7 @@ static void applyDefaultDeviceConfig(DeviceConfig& cfg) {
   cfg.timezoneIndex = DEFAULT_TIMEZONE_INDEX;
   cfg.displayThemeMode = (uint8_t)DEFAULT_DISPLAY_THEME_MODE;
   cfg.refreshIntervalMinutes = DEFAULT_REFRESH_INTERVAL_MINUTES;
-  cfg.showBatteryPercent = true;
+  cfg.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
   safeCopyCString(cfg.mqttServer, sizeof(cfg.mqttServer), DEFAULT_MQTT_SERVER);
   cfg.mqttPort = DEFAULT_MQTT_PORT;
   safeCopyCString(cfg.mqttUser, sizeof(cfg.mqttUser), DEFAULT_MQTT_USER);
@@ -288,7 +289,9 @@ static bool loadDeviceConfig(DeviceConfig& cfg) {
   cfg.timezoneIndex     = (uint8_t)preferences.getUInt("tz",         DEFAULT_TIMEZONE_INDEX);
   cfg.displayThemeMode  = (uint8_t)preferences.getUInt("theme",      DEFAULT_DISPLAY_THEME_MODE);
   cfg.refreshIntervalMinutes = (uint16_t)preferences.getUInt("refreshmin", DEFAULT_REFRESH_INTERVAL_MINUTES);
-  cfg.showBatteryPercent = preferences.getBool("showbatt", true);
+  // "showbatt" is the legacy bool (percent on/off, icon always drawn).
+  const uint32_t legacyBatteryMode = preferences.getBool("showbatt", true) ? BATTERY_DISPLAY_ICON_PERCENT : BATTERY_DISPLAY_ICON;
+  cfg.batteryDisplayMode = (uint8_t)preferences.getUInt("battmode", legacyBatteryMode);
   preferences.getString("mqttsrv",     cfg.mqttServer,     sizeof(cfg.mqttServer));
   cfg.mqttPort          = (uint16_t)preferences.getUInt("mqttport",  DEFAULT_MQTT_PORT);
   preferences.getString("mqttuser",    cfg.mqttUser,       sizeof(cfg.mqttUser));
@@ -322,7 +325,7 @@ static bool saveDeviceConfig(const DeviceConfig& cfg) {
   preferences.putUInt("tz",         (uint32_t)copy.timezoneIndex);
   preferences.putUInt("theme",      (uint32_t)copy.displayThemeMode);
   preferences.putUInt("refreshmin", (uint32_t)copy.refreshIntervalMinutes);
-  preferences.putBool("showbatt",   copy.showBatteryPercent);
+  preferences.putUInt("battmode",   (uint32_t)copy.batteryDisplayMode);
   preferences.putString("mqttsrv",  copy.mqttServer);
   preferences.putUInt("mqttport",   (uint32_t)copy.mqttPort);
   preferences.putString("mqttuser", copy.mqttUser);

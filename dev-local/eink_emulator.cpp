@@ -285,7 +285,7 @@ static void renderScreen(const std::string& screen) {
     deviceConfig.configured = true;
     deviceConfig.currencyCode = DEFAULT_CURRENCY_CODE;
     deviceConfig.displayThemeMode = DEFAULT_DISPLAY_THEME_MODE;
-    deviceConfig.showBatteryPercent = true;
+    deviceConfig.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
     drawBlockDashboard(data, deviceConfig);
   } else if (screen == "loading") {
     drawBrandedStatusScreen("CONNECTING", "Fetching data", false);

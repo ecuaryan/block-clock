@@ -60,6 +60,12 @@ enum CurrencyCode : uint8_t {
   CURRENCY_AUD = 5
 };
 
+enum BatteryDisplayMode : uint8_t {
+  BATTERY_DISPLAY_HIDDEN = 0,
+  BATTERY_DISPLAY_ICON = 1,
+  BATTERY_DISPLAY_ICON_PERCENT = 2
+};
+
 struct DeviceConfig {
   uint32_t version;
   bool configured;
@@ -70,7 +76,7 @@ struct DeviceConfig {
   uint8_t timezoneIndex;
   uint8_t displayThemeMode;
   uint16_t refreshIntervalMinutes;
-  bool showBatteryPercent;
+  uint8_t batteryDisplayMode;
   char mqttServer[64];
   uint16_t mqttPort;
   char mqttUser[64];
