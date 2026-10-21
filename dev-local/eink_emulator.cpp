@@ -205,8 +205,11 @@ static String formatTimestamp(time_t when) {
   if (when < 1700000000) return "---";
   struct tm tmValue = {};
   if (!localtime_r(&when, &tmValue)) return "---";
-  char buffer[32];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %I:%M %p", &tmValue);
+  char month[8];
+  strftime(month, sizeof(month), "%b", &tmValue);
+  const int hour12 = (tmValue.tm_hour % 12) == 0 ? 12 : (tmValue.tm_hour % 12);
+  char buffer[28];
+  snprintf(buffer, sizeof(buffer), "%s %d, %d:%02d %s", month, tmValue.tm_mday, hour12, tmValue.tm_min, tmValue.tm_hour < 12 ? "AM" : "PM");
   return String(buffer);
 }
 

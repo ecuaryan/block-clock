@@ -134,6 +134,7 @@ static constexpr char DEFAULT_TOPIC_HASHRATE[] = "home/bitcoin/hashrate_ehs";
 static constexpr char DEFAULT_TOPIC_PRICE_VALUE[] = "home/bitcoin/price/usd";
 
 static constexpr char MEMPOOL_TIP_HEIGHT_URL[] = "https://mempool.space/api/blocks/tip/height";
+static constexpr uint32_t MEMPOOL_PRICE_MAX_AGE_SECONDS = 240;
 static constexpr char MEMPOOL_PRICE_URL[] = "https://mempool.space/api/v1/prices";
 static constexpr char MEMPOOL_HASHRATE_URL[] = "https://mempool.space/api/v1/mining/hashrate/3d";
 static constexpr char MEMPOOL_PRECISE_FEES_URL[] = "https://mempool.space/api/v1/fees/precise";

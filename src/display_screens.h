@@ -399,8 +399,19 @@ static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg) {
 
   const time_t nowT = time(nullptr);
   const String timestamp = formatTimestamp(nowT >= 1700000000 ? nowT : data.updatedAt);
-  char updatedText[48];
-  snprintf(updatedText, sizeof(updatedText), "Updated %s", timestamp.c_str());
+
+  // Sub-line under the price: sats per currency unit, then the update time.
+  char satsText[28] = "";
+  const long price = atol(data.priceValue);
+  if (price > 0) {
+    char satsRaw[16];
+    char satsValue[16];
+    snprintf(satsRaw, sizeof(satsRaw), "%ld", (100000000L + (price / 2)) / price);
+    formatPriceWithCommas(satsRaw, satsValue, sizeof(satsValue));
+    snprintf(satsText, sizeof(satsText), "%s sats/%s", satsValue, cfg.currencyCode == CURRENCY_USD ? "$" : currencyCodeLabel(cfg.currencyCode));
+  }
+  char updatedText[72];
+  snprintf(updatedText, sizeof(updatedText), "%s%s%s", satsText, satsText[0] ? "  |  " : "", timestamp.c_str());
   drawCenteredDashboardText(updatedText, centerX, 51, 1);
 
   const int margin = 8;
@@ -432,10 +443,13 @@ static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg) {
 
   const int feeDividerY = 98;
   display.drawLine(margin, feeDividerY, DEVICE_DISPLAY_WIDTH - margin, feeDividerY, theme.foreground);
-  const int feeColumnWidth = (DEVICE_DISPLAY_WIDTH - (2 * margin)) / 3;
-  for (int index = 1; index < 3; index++) {
-    const int dividerX = margin + (index * feeColumnWidth);
-    display.drawLine(dividerX, 103, dividerX, DEVICE_DISPLAY_HEIGHT - 1, theme.foreground);
+  // Fee table: LOW / MED / HIGH columns, then "sat/vB" once as a trailing unit.
+  const int feeUnitWidth = 48;
+  const int feeColumnWidth = (DEVICE_DISPLAY_WIDTH - (2 * margin) - feeUnitWidth) / 3;
+  const int feeColumnsX = margin;
+  for (int index = 1; index <= 3; index++) {
+    const int dividerX = feeColumnsX + (index * feeColumnWidth);
+    display.drawLine(dividerX, 103, dividerX, DEVICE_DISPLAY_HEIGHT - 3, theme.foreground);
   }
 
   char feeValues[3][12] = { "--", "--", "--" };
@@ -449,20 +463,12 @@ static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg) {
       snprintf(feeValues[index], sizeof(feeValues[index]), "%.1f", feeRates[index]);
     }
   }
-  const char* feeLabels[] = { "LOW", "MEDIUM", "HIGH" };
+  const char* feeLabels[] = { "LOW", "MED", "HIGH" };
+  drawCenteredDashboardText("sat/vB", feeColumnsX + (3 * feeColumnWidth) + (feeUnitWidth / 2), 112, 1);
   for (int index = 0; index < 3; index++) {
-    const int columnX = margin + (index * feeColumnWidth);
-    const int columnCenter = columnX + (feeColumnWidth / 2);
-    const int valueWidth = (int)strlen(feeValues[index]) * 6;
-    const int unitWidth = 6 * 6;
-    const int groupWidth = valueWidth + unitWidth + 3;
-    const int valueX = columnCenter - (groupWidth / 2);
+    const int columnCenter = feeColumnsX + (index * feeColumnWidth) + (feeColumnWidth / 2);
     drawFeeLabel(feeLabels[index], columnCenter, 101, theme.foreground);
-    display.setTextSize(1);
-    display.setCursor(valueX, 115);
-    display.print(feeValues[index]);
-    display.setCursor(valueX + valueWidth + 3, 115);
-    display.print("sat/vB");
+    drawCenteredDashboardText(feeValues[index], columnCenter, 110, 2);
   }
 
   if (!data.wifiOk) {

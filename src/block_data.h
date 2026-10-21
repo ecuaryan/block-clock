@@ -146,6 +146,11 @@ static bool fetchMempoolPrice(const DeviceConfig& cfg, BlockData& outData) {
 
   StaticJsonDocument<384> doc;
   if (deserializeJson(doc, payload)) return false;
+  // mempool.space can serve a frozen price while still returning 200 OK; if its
+  // timestamp is over 4 minutes old, fail so the caller falls back to CoinGecko.
+  const time_t now = time(nullptr);
+  const time_t priceTime = doc["time"].as<time_t>();
+  if (now >= 1700000000 && priceTime > 0 && (now - priceTime) > MEMPOOL_PRICE_MAX_AGE_SECONDS) return false;
   const char* currency = currencyCodeLabel(cfg.currencyCode);
   if (!doc[currency].is<float>() && !doc[currency].is<int>()) return false;
   const long price = doc[currency].as<long>();
