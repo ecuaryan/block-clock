@@ -142,6 +142,20 @@ static String portalPage() {
   html += F("<option value=\"4\""); html += selectedAttr(sanitizeCurrencyCode(deviceConfig.currencyCode) == CURRENCY_CAD); html += F(">CAD</option>");
   html += F("<option value=\"5\""); html += selectedAttr(sanitizeCurrencyCode(deviceConfig.currencyCode) == CURRENCY_AUD); html += F(">AUD</option>");
   html += F("</select>");
+  html += F("</div><div>");
+  html += F("<label for=\"timezone\">Timezone</label>");
+  html += F("<select id=\"timezone\" name=\"timezone\">");
+  for (uint8_t index = 0; index < TIMEZONE_OPTION_COUNT; index++) {
+    html += F("<option value=\"");
+    html += String(index);
+    html += F("\"");
+    html += selectedAttr(sanitizeTimezoneIndex(deviceConfig.timezoneIndex) == index);
+    html += F(">");
+    html += TIMEZONE_OPTIONS[index].label;
+    html += F("</option>");
+  }
+  html += F("</select>");
+  html += F("<div class=\"hint\">Used for the time shown on the display.</div>");
   html += F("</div></div></section>");
 
   // ── Wi-Fi ─────────────────────────────────────────────────────────────────
@@ -296,6 +310,7 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
   safeCopyString(cfg.wifiPass, sizeof(cfg.wifiPass), portalServer.arg("wifi_pass"));
   cfg.dataSourceMode = portalServer.arg("data_source") == "mqtt" ? DATA_SOURCE_MQTT : DATA_SOURCE_ONLINE;
   cfg.currencyCode = (uint8_t)sanitizeCurrencyCode((uint8_t)portalServer.arg("currency").toInt());
+  cfg.timezoneIndex = sanitizeTimezoneIndex((uint8_t)portalServer.arg("timezone").toInt());
   cfg.displayThemeMode = (uint8_t)sanitizeThemeMode((uint8_t)portalServer.arg("display_theme_mode").toInt());
   const RefreshIntervalUnit refreshUnit = parseRefreshIntervalUnit(portalServer.arg("refresh_interval_unit"));
   cfg.refreshIntervalMinutes = (uint16_t)clampInt(

@@ -112,6 +112,39 @@ static DisplayThemeMode statusScreenThemeMode() {
     : DISPLAY_THEME_LIGHT;
 }
 
+struct TimezoneOption {
+  const char* label;
+  const char* posix;
+};
+
+// Stored by index in NVS: append new zones to the end, never reorder.
+static constexpr TimezoneOption TIMEZONE_OPTIONS[] = {
+  { "US Eastern", "EST5EDT,M3.2.0,M11.1.0" },
+  { "US Central", "CST6CDT,M3.2.0,M11.1.0" },
+  { "US Mountain", "MST7MDT,M3.2.0,M11.1.0" },
+  { "US Arizona (no DST)", "MST7" },
+  { "US Pacific", "PST8PDT,M3.2.0,M11.1.0" },
+  { "US Alaska", "AKST9AKDT,M3.2.0,M11.1.0" },
+  { "US Hawaii", "HST10" },
+  { "UTC", "UTC0" },
+  { "UK / Ireland", "GMT0BST,M3.5.0/1,M10.5.0" },
+  { "Central Europe", "CET-1CEST,M3.5.0,M10.5.0/3" },
+  { "Eastern Europe", "EET-2EEST,M3.5.0/3,M10.5.0/4" },
+  { "Dubai", "<+04>-4" },
+  { "India", "IST-5:30" },
+  { "Singapore / Hong Kong / Perth", "<+08>-8" },
+  { "Japan / Korea", "JST-9" },
+  { "Sydney / Melbourne", "AEST-10AEDT,M10.1.0,M4.1.0/3" },
+  { "New Zealand", "NZST-12NZDT,M9.5.0,M4.1.0/3" },
+  { "Atlantic Canada", "AST4ADT,M3.2.0,M11.1.0" },
+  { "Sao Paulo", "<-03>3" }
+};
+static constexpr uint8_t TIMEZONE_OPTION_COUNT = sizeof(TIMEZONE_OPTIONS) / sizeof(TIMEZONE_OPTIONS[0]);
+
+static uint8_t sanitizeTimezoneIndex(uint8_t rawValue) {
+  return rawValue < TIMEZONE_OPTION_COUNT ? rawValue : DEFAULT_TIMEZONE_INDEX;
+}
+
 static CurrencyCode sanitizeCurrencyCode(uint8_t rawValue) {
   switch (rawValue) {
     case CURRENCY_EUR:
@@ -203,6 +236,7 @@ static void normalizeDeviceConfig(DeviceConfig& cfg) {
   cfg.version = CONFIG_VERSION;
   cfg.dataSourceMode = (uint8_t)sanitizeDataSourceMode(cfg.dataSourceMode);
   cfg.currencyCode = (uint8_t)sanitizeCurrencyCode(cfg.currencyCode);
+  cfg.timezoneIndex = sanitizeTimezoneIndex(cfg.timezoneIndex);
   cfg.displayThemeMode = (uint8_t)sanitizeThemeMode(cfg.displayThemeMode);
   cfg.refreshIntervalMinutes = (uint16_t)clampInt(
     (int)cfg.refreshIntervalMinutes,
@@ -224,6 +258,7 @@ static void applyDefaultDeviceConfig(DeviceConfig& cfg) {
   cfg.configured = false;
   cfg.dataSourceMode = DATA_SOURCE_ONLINE;
   cfg.currencyCode = DEFAULT_CURRENCY_CODE;
+  cfg.timezoneIndex = DEFAULT_TIMEZONE_INDEX;
   cfg.displayThemeMode = (uint8_t)DEFAULT_DISPLAY_THEME_MODE;
   cfg.refreshIntervalMinutes = DEFAULT_REFRESH_INTERVAL_MINUTES;
   cfg.showBatteryPercent = true;
@@ -250,6 +285,7 @@ static bool loadDeviceConfig(DeviceConfig& cfg) {
   preferences.getString("wifipass",    cfg.wifiPass,       sizeof(cfg.wifiPass));
   cfg.dataSourceMode    = (uint8_t)preferences.getUInt("datasrc",    DATA_SOURCE_ONLINE);
   cfg.currencyCode      = (uint8_t)preferences.getUInt("currency",   DEFAULT_CURRENCY_CODE);
+  cfg.timezoneIndex     = (uint8_t)preferences.getUInt("tz",         DEFAULT_TIMEZONE_INDEX);
   cfg.displayThemeMode  = (uint8_t)preferences.getUInt("theme",      DEFAULT_DISPLAY_THEME_MODE);
   cfg.refreshIntervalMinutes = (uint16_t)preferences.getUInt("refreshmin", DEFAULT_REFRESH_INTERVAL_MINUTES);
   cfg.showBatteryPercent = preferences.getBool("showbatt", true);
@@ -283,6 +319,7 @@ static bool saveDeviceConfig(const DeviceConfig& cfg) {
   preferences.putString("wifipass", copy.wifiPass);
   preferences.putUInt("datasrc",    (uint32_t)copy.dataSourceMode);
   preferences.putUInt("currency",   (uint32_t)copy.currencyCode);
+  preferences.putUInt("tz",         (uint32_t)copy.timezoneIndex);
   preferences.putUInt("theme",      (uint32_t)copy.displayThemeMode);
   preferences.putUInt("refreshmin", (uint32_t)copy.refreshIntervalMinutes);
   preferences.putBool("showbatt",   copy.showBatteryPercent);
@@ -545,8 +582,14 @@ static float readBatteryVoltage() {
   return adcVolts * VBAT_SCALE;
 }
 
-static bool syncClockFromNtp(uint16_t timeoutMs = NTP_SYNC_TIMEOUT_MS) {
-  configTzTime("MST7MDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
+// Set the local timezone from config so timestamps are correct even if NTP sync fails.
+static void applyTimezone(const DeviceConfig& cfg) {
+  setenv("TZ", TIMEZONE_OPTIONS[sanitizeTimezoneIndex(cfg.timezoneIndex)].posix, 1);
+  tzset();
+}
+
+static bool syncClockFromNtp(const DeviceConfig& cfg, uint16_t timeoutMs = NTP_SYNC_TIMEOUT_MS) {
+  configTzTime(TIMEZONE_OPTIONS[sanitizeTimezoneIndex(cfg.timezoneIndex)].posix, "pool.ntp.org", "time.nist.gov");
   uint32_t start = millis();
   time_t now = time(nullptr);
   while (now < 1700000000 && (millis() - start) < timeoutMs) {

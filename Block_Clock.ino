@@ -254,6 +254,7 @@ void setup() {
 
   loadDeviceConfig(deviceConfig);
   applySecretsBootstrap(deviceConfig);
+  applyTimezone(deviceConfig);
   const bool postSaveRestartPending = takePostSaveRestartPending();
 
   if (!deviceConfig.configured && !hasWelcomeBeenShown()) {
@@ -340,7 +341,7 @@ void setup() {
 
   bool dataOk = false;
   if (wifiOk) {
-    syncClockFromNtp();
+    syncClockFromNtp(deviceConfig);
     if (deviceConfig.dataSourceMode == DATA_SOURCE_MQTT) {
       dataOk = fetchBlockDataFromMqtt(deviceConfig, data);
     } else {

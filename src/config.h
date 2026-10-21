@@ -67,6 +67,7 @@ struct DeviceConfig {
   char wifiPass[65];
   uint8_t dataSourceMode;
   uint8_t currencyCode;
+  uint8_t timezoneIndex;
   uint8_t displayThemeMode;
   uint16_t refreshIntervalMinutes;
   bool showBatteryPercent;
@@ -97,6 +98,7 @@ struct BlockData {
 };
 
 static constexpr uint8_t DEFAULT_CURRENCY_CODE = CURRENCY_USD;
+static constexpr uint8_t DEFAULT_TIMEZONE_INDEX = 2;  // US Mountain, matches TIMEZONE_OPTIONS
 static constexpr DisplayThemeMode DEFAULT_DISPLAY_THEME_MODE = DISPLAY_THEME_LIGHT;
 static constexpr char LOADING_TEXT[] = "---";
 
