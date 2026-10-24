@@ -207,7 +207,7 @@ static void fetchOnlinePreciseFees(BlockData& outData) {
   }
 }
 
-static void fetchOnlineLastBlockTimestamp(BlockData& outData) {
+static void fetchOnlineLastBlockInfo(BlockData& outData) {
   if (!hasText(outData.blockHeight) || !isUsefulDataValue(outData.blockHeight)) return;
 
   String hashUrl = MEMPOOL_BLOCK_HASH_URL_PREFIX;
@@ -220,12 +220,70 @@ static void fetchOnlineLastBlockTimestamp(BlockData& outData) {
   String payload;
   if (!httpGetString(blockUrl.c_str(), payload)) return;
 
-  StaticJsonDocument<64> filter;
+  StaticJsonDocument<96> filter;
   filter["timestamp"] = true;
-  StaticJsonDocument<128> doc;
-  if (deserializeJson(doc, payload, DeserializationOption::Filter(filter)) || !doc["timestamp"].is<time_t>()) return;
-  const time_t blockTimestamp = doc["timestamp"].as<time_t>();
-  if (blockTimestamp > 0) outData.lastBlockTimestamp = blockTimestamp;
+  filter["extras"]["totalFees"] = true;
+  StaticJsonDocument<192> doc;
+  if (deserializeJson(doc, payload, DeserializationOption::Filter(filter))) return;
+  if (doc["timestamp"].is<time_t>()) {
+    const time_t blockTimestamp = doc["timestamp"].as<time_t>();
+    if (blockTimestamp > 0) outData.lastBlockTimestamp = blockTimestamp;
+  }
+  if (doc["extras"]["totalFees"].is<int64_t>()) {
+    const int64_t totalFees = doc["extras"]["totalFees"].as<int64_t>();
+    if (totalFees >= 0) outData.lastBlockFeesSats = totalFees;
+  }
+}
+
+// Unix time for a UTC calendar date (days-from-civil), since newlib has no timegm.
+static time_t unixFromUtc(int year, int month, int day, int hour, int minute, int second) {
+  year -= month <= 2;
+  const int era = (year >= 0 ? year : year - 399) / 400;
+  const unsigned yearOfEra = (unsigned)(year - era * 400);
+  const unsigned dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+  const unsigned dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+  const long days = (long)era * 146097L + (long)dayOfEra - 719468L;
+  return (time_t)(days * 86400L + hour * 3600L + minute * 60L + second);
+}
+
+static bool parseIsoUtc(const char* text, time_t& out) {
+  int year, month, day, hour, minute, second;
+  if (!text || sscanf(text, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) return false;
+  out = unixFromUtc(year, month, day, hour, minute, second);
+  return out > 0;
+}
+
+// The all-time high and its date, from CoinGecko. Checked every few hours, not every wake.
+static void fetchCoinGeckoAth(const DeviceConfig& cfg, BlockData& outData) {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return;
+  if (outData.athPrice > 0 && outData.athCurrency != cfg.currencyCode) {
+    outData.athPrice = 0;
+    outData.athTimestamp = 0;
+    outData.athCheckedAt = 0;
+  }
+  const uint32_t waitSeconds = outData.athPrice > 0 ? ATH_REFRESH_SECONDS : ATH_RETRY_SECONDS;
+  if (now >= outData.athCheckedAt && (now - outData.athCheckedAt) < (time_t)waitSeconds) return;
+  outData.athCheckedAt = now;  // count this as an attempt, so a rate limit does not retry on every wake
+
+  String url = COINGECKO_MARKETS_URL_PREFIX;
+  url += currencyCodeParam(cfg.currencyCode);
+  url += COINGECKO_MARKETS_URL_SUFFIX;
+  String payload;
+  if (!httpGetString(url.c_str(), payload)) return;
+
+  StaticJsonDocument<64> filter;
+  filter[0]["ath"] = true;
+  filter[0]["ath_date"] = true;
+  StaticJsonDocument<192> doc;
+  if (deserializeJson(doc, payload, DeserializationOption::Filter(filter))) return;
+  const double ath = doc[0]["ath"] | 0.0;
+  time_t athTime = 0;
+  if (ath <= 0.0 || !parseIsoUtc(doc[0]["ath_date"] | "", athTime)) return;
+
+  outData.athPrice = lround(ath);
+  outData.athTimestamp = athTime;
+  outData.athCurrency = cfg.currencyCode;
 }
 
 static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {
@@ -239,6 +297,13 @@ static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {
     ok = true;
   }
   fetchOnlinePreciseFees(outData);
-  if (heightOk) fetchOnlineLastBlockTimestamp(outData);
+  if (heightOk) fetchOnlineLastBlockInfo(outData);
+  fetchCoinGeckoAth(cfg, outData);
+  // A price above the stored high is a new high, whatever the last check said.
+  const long price = atol(outData.priceValue);
+  if (price > 0 && outData.athPrice > 0 && price > outData.athPrice) {
+    outData.athPrice = price;
+    if (time(nullptr) >= 1700000000) outData.athTimestamp = time(nullptr);
+  }
   return ok;
 }

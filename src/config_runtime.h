@@ -394,6 +394,7 @@ static BlockData emptyBlockData() {
   data.mediumFeeSatVb = -1.0f;
   data.highFeeSatVb = -1.0f;
   data.lastBlockTimestamp = 0;
+  data.lastBlockFeesSats = -1;
   data.batteryVoltage = 0.0f;
   data.batteryPercent = -1;
   data.updatedAt = 0;

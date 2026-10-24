@@ -96,6 +96,11 @@ struct BlockData {
   float mediumFeeSatVb;
   float highFeeSatVb;
   time_t lastBlockTimestamp;
+  int64_t lastBlockFeesSats;  // total fees of the last block, -1 when unknown
+  long athPrice;              // all-time high in the display currency, 0 when unknown
+  time_t athTimestamp;        // when the all-time high was set, 0 when unknown
+  time_t athCheckedAt;        // when the all-time high was last checked, successful or not
+  uint8_t athCurrency;        // currency the stored all-time high is in
   float batteryVoltage;
   int batteryPercent;
   time_t updatedAt;
@@ -118,6 +123,8 @@ static constexpr uint32_t CONFIG_PORTAL_EXIT_GRACE_MS = 2500;
 static constexpr uint32_t CONFIG_PORTAL_RESTART_DELAY_MS = 1200;
 static constexpr uint32_t FACTORY_RESET_HOLD_MS = 10000;
 static constexpr uint16_t BUTTON_POLL_DELAY_MS = 20;
+static constexpr uint16_t FUNCTION_LONG_PRESS_MS = 1500;  // hold FUNCTION this long to refresh instead of cycling
+static constexpr uint32_t SETUP_PORTAL_HOLD_MS = 3000;    // hold SETUP this long to open setup; a quicker tap cycles screens
 static constexpr uint16_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint16_t WIFI_POLL_DELAY_MS = 250;
 static constexpr uint16_t MQTT_CONNECT_TIMEOUT_MS = 5000;
@@ -130,7 +137,6 @@ static constexpr uint16_t BATTERY_ADC_SETTLE_DELAY_MS = 5;
 static constexpr uint16_t MIN_REFRESH_INTERVAL_MINUTES = 1;
 static constexpr uint16_t MAX_REFRESH_INTERVAL_MINUTES = 10080;
 static constexpr uint16_t DEFAULT_REFRESH_INTERVAL_MINUTES = 10;
-static constexpr uint64_t MICROSECONDS_PER_MINUTE = 60ULL * 1000000ULL;
 
 static constexpr char DEFAULT_MQTT_SERVER[] = "mqtt.local";
 static constexpr uint16_t DEFAULT_MQTT_PORT = 1883;
@@ -147,9 +153,13 @@ static constexpr char MEMPOOL_PRICE_URL[] = "https://mempool.space/api/v1/prices
 static constexpr char MEMPOOL_HASHRATE_URL[] = "https://mempool.space/api/v1/mining/hashrate/3d";
 static constexpr char MEMPOOL_PRECISE_FEES_URL[] = "https://mempool.space/api/v1/fees/precise";
 static constexpr char MEMPOOL_BLOCK_HASH_URL_PREFIX[] = "https://mempool.space/api/block-height/";
-static constexpr char MEMPOOL_BLOCK_URL_PREFIX[] = "https://mempool.space/api/block/";
+static constexpr char MEMPOOL_BLOCK_URL_PREFIX[] = "https://mempool.space/api/v1/block/";
 static constexpr char COINGECKO_PRICE_URL_PREFIX[] = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=";
 static constexpr char COINGECKO_PRICE_URL_SUFFIX[] = "&precision=0";
+static constexpr char COINGECKO_MARKETS_URL_PREFIX[] = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=";
+static constexpr char COINGECKO_MARKETS_URL_SUFFIX[] = "&ids=bitcoin&per_page=1&page=1&sparkline=false";
+static constexpr uint32_t ATH_REFRESH_SECONDS = 6UL * 60UL * 60UL;  // the all-time high rarely moves
+static constexpr uint32_t ATH_RETRY_SECONDS = 15UL * 60UL;          // after a failed check, wait before asking again
 static constexpr uint32_t HALVING_INTERVAL_BLOCKS = 210000UL;
 
 // ============================================================

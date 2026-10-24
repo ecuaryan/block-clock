@@ -84,6 +84,7 @@
 
 RTC_DATA_ATTR BlockData rtcBlockData = {};
 RTC_DATA_ATTR bool rtcHasBlockData = false;
+RTC_DATA_ATTR uint8_t rtcScreenIndex = 0;
 RTC_DATA_ATTR int rtcBatteryPercent = -1;
 RTC_DATA_ATTR float rtcBatteryVoltage = 0.0f;
 RTC_DATA_ATTR time_t rtcLastKnownUnixTime = 0;
@@ -111,7 +112,8 @@ bool portalFactoryResetRequested = false;
 enum SetupBootAction : uint8_t {
   SETUP_BOOT_ACTION_NONE = 0,
   SETUP_BOOT_ACTION_PORTAL = 1,
-  SETUP_BOOT_ACTION_FACTORY_RESET = 2
+  SETUP_BOOT_ACTION_FACTORY_RESET = 2,
+  SETUP_BOOT_ACTION_CYCLE = 3
 };
 
 #include "src/config_runtime.h"
@@ -144,7 +146,7 @@ static SetupBootAction detectSetupBootAction() {
   pinMode(PIN_SETUP_BUTTON, INPUT_PULLUP);
   delay(BUTTON_POLL_DELAY_MS);
   if (digitalRead(PIN_SETUP_BUTTON) != LOW) {
-    return setupWakeRequested() ? SETUP_BOOT_ACTION_PORTAL : SETUP_BOOT_ACTION_NONE;
+    return setupWakeRequested() ? SETUP_BOOT_ACTION_CYCLE : SETUP_BOOT_ACTION_NONE;
   }
 
   const uint32_t start = millis();
@@ -154,7 +156,8 @@ static SetupBootAction detectSetupBootAction() {
     }
     delay(BUTTON_POLL_DELAY_MS);
   }
-  return SETUP_BOOT_ACTION_PORTAL;
+  // A deliberate hold opens setup; a quick tap flips screens, like FUNCTION does.
+  return (millis() - start) >= SETUP_PORTAL_HOLD_MS ? SETUP_BOOT_ACTION_PORTAL : SETUP_BOOT_ACTION_CYCLE;
 }
 
 static void prepareHardware() {
@@ -179,7 +182,7 @@ static void disconnectNetwork() {
   WiFi.mode(WIFI_OFF);
 }
 
-static void goToSleep(uint16_t refreshMinutes) {
+static void goToSleepForSeconds(uint32_t seconds) {
   digitalWrite(PIN_EINK_POWER, LOW);
 
   rtc_gpio_pullup_en((gpio_num_t)PIN_FUNCTION_BUTTON);
@@ -188,10 +191,42 @@ static void goToSleep(uint16_t refreshMinutes) {
   rtc_gpio_pulldown_dis((gpio_num_t)PIN_SETUP_BUTTON);
   esp_sleep_enable_ext1_wakeup_io(BUTTON_WAKE_MASK, ESP_EXT1_WAKEUP_ANY_LOW);
 
-  const uint64_t sleepUs = (uint64_t)refreshMinutes * MICROSECONDS_PER_MINUTE;
-  esp_sleep_enable_timer_wakeup(sleepUs);
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
   Serial.flush();
   esp_deep_sleep_start();
+}
+
+static void goToSleep(uint16_t refreshMinutes) {
+  goToSleepForSeconds((uint32_t)refreshMinutes * 60UL);
+}
+
+// Time left in the current refresh interval, so flipping screens never postpones the next refresh.
+static uint32_t secondsUntilNextRefresh() {
+  const uint32_t interval = (uint32_t)deviceConfig.refreshIntervalMinutes * 60UL;
+  const time_t now = time(nullptr);
+  if (now < 1700000000 || rtcLastKnownUnixTime < 1700000000 || now < rtcLastKnownUnixTime) return interval;
+  const uint32_t elapsed = (uint32_t)(now - rtcLastKnownUnixTime);
+  return elapsed + 5 >= interval ? 5 : interval - elapsed;
+}
+
+static bool functionButtonHeld(uint32_t holdMs) {
+  const uint32_t start = millis();
+  while (digitalRead(PIN_FUNCTION_BUTTON) == LOW) {
+    if ((millis() - start) >= holdMs) return true;
+    delay(BUTTON_POLL_DELAY_MS);
+  }
+  return false;
+}
+
+// Short FUNCTION press: next dashboard screen from the cached data, no network.
+static void showNextScreenAndSleep(float batteryVoltage, int batteryPercent) {
+  rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+  BlockData data = rtcBlockData;
+  data.batteryVoltage = batteryVoltage;
+  data.batteryPercent = batteryPercent;
+  clearScreenRenderWindow();
+  drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
+  goToSleepForSeconds(secondsUntilNextRefresh());
 }
 
 static void goToWelcomeSleep() {
@@ -209,6 +244,7 @@ static void goToWelcomeSleep() {
 
 static void resetRuntimeState() {
   rtcHasBlockData = false;
+  rtcScreenIndex = 0;
   rtcBlockData = {};
   rtcBatteryPercent = -1;
   rtcBatteryVoltage = 0.0f;
@@ -272,7 +308,8 @@ void setup() {
 
   const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
   const esp_reset_reason_t resetReason = esp_reset_reason();
-  const bool manualWake = wasFunctionButtonWake();
+  const bool functionWake = wasFunctionButtonWake();
+  const bool manualWake = functionWake || bootAction == SETUP_BOOT_ACTION_CYCLE;
   // Mirror Freedom Clock: hardware-reset / power-on / brownout (wake cause undefined
   // and reset reason not "SW restart") with a configured device is a "user is
   // looking at the screen waiting for data" event. Without this case, HW-reset
@@ -297,6 +334,14 @@ void setup() {
   int batteryPercent = stabilizedBatteryPercentFromVoltage(batteryVoltage, rtcLastKnownUnixTime);
   rtcBatteryVoltage = batteryVoltage;
   rtcBatteryPercent = batteryPercent;
+
+  // A quick tap on FUNCTION or SETUP flips screens from cache; holding FUNCTION falls through to a full refresh.
+  if (manualWake && rtcHasBlockData && !(functionWake && functionButtonHeld(FUNCTION_LONG_PRESS_MS))) {
+    showNextScreenAndSleep(batteryVoltage, batteryPercent);
+    return;
+  }
+  // A refresh keeps whichever screen was last picked; only a button tap changes it.
+  if (rtcScreenIndex >= DASHBOARD_SCREEN_COUNT) rtcScreenIndex = 0;
 
   // Freedom Clock pattern: when this boot is a known "user is waiting for data"
   // case — button wake with cache, or the very first boot after a portal save —
@@ -323,7 +368,7 @@ void setup() {
     pending.dataOk = false;
     pending.updatedAt = 0;
     clearScreenRenderWindow();
-    drawBlockDashboard(pending, deviceConfig);
+    drawBlockDashboard(pending, deviceConfig, rtcScreenIndex);
     pendingFrameDrawn = true;
   } else {
     Serial.printf("[BlockClock] pending frame skipped (manualWake=%d homeReset=%d hasCache=%d postSave=%d)\n",
@@ -372,13 +417,13 @@ void setup() {
     // pending frame as the base image), fastmode off.
     setScreenRenderWindow(0, 0, DEVICE_DISPLAY_WIDTH, DEVICE_DISPLAY_HEIGHT);
     display.fastmodeOn(false);
-    drawBlockDashboard(data, deviceConfig);
+    drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
     display.fastmodeOff();
     clearScreenRenderWindow();
   } else {
     // Timer wake: e-ink retains previous image during deep sleep, so we let it
     // sit during fetch and do one clean full refresh at the end.
-    drawBlockDashboard(data, deviceConfig);
+    drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
   }
   disconnectNetwork();
   goToSleep(deviceConfig.refreshIntervalMinutes);
