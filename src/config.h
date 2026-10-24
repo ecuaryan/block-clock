@@ -159,7 +159,7 @@ static constexpr char COINGECKO_PRICE_URL_SUFFIX[] = "&precision=0";
 static constexpr char COINGECKO_MARKETS_URL_PREFIX[] = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=";
 static constexpr char COINGECKO_MARKETS_URL_SUFFIX[] = "&ids=bitcoin&per_page=1&page=1&sparkline=false";
 static constexpr uint32_t ATH_REFRESH_SECONDS = 6UL * 60UL * 60UL;  // the all-time high rarely moves
-static constexpr uint32_t ATH_RETRY_SECONDS = 15UL * 60UL;          // after a failed check, wait before asking again
+static constexpr uint32_t ATH_RETRY_SECONDS = 3UL * 60UL;           // after a failed check (CoinGecko rate limits), wait before asking again
 static constexpr uint32_t HALVING_INTERVAL_BLOCKS = 210000UL;
 
 // ============================================================
