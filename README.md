@@ -98,8 +98,12 @@ There is no setup PIN. Block Clock does not store personal financial data.
 
 ## Buttons
 
-- `FUNCTION` (`GPIO21`): press while the clock is asleep to immediately show the latest data on screen.
-- `SETUP` (`BOOT / GPIO0`): press once while asleep to enter setup mode. Hold for about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
+- `FUNCTION` (`GPIO21`): a quick tap while the clock is asleep flips to the next screen (Price, Network, Supply) from the last fetched data, with no network wait. Hold for about 1.5 seconds to fetch fresh data instead.
+- `SETUP` (`BOOT / GPIO0`): a quick tap flips screens too, so either button works for browsing. Hold for about 3 seconds to enter setup mode. Hold for about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
+
+The clock stays on the screen you picked when it refreshes on its timer.
+
+On the printed case the buttons carry icons: the square frame is `SETUP`, the X is `FUNCTION`, and the ring is `HOME` (RST).
 
 Avoid holding `SETUP` while pressing `HOME` (RST); on ESP32 boards that combination can enter the bootloader used for flashing firmware.
 
@@ -137,6 +141,8 @@ Main defaults are in [src/config.h](src/config.h).
 5. Select the matching board in Tools > Board:
    - `Heltec Vision Master E213`
    - `Heltec Vision Master E290`
+
+   The three-screen dashboard is laid out for the E290 (296 × 128). The E213 profile still builds, but its layout has not been adapted to the smaller 250 × 122 panel.
 6. Upload the sketch.
 7. Press the RST button on the device once the upload starts if the board does not enter flash mode automatically.
 8. Join the device setup Wi-Fi and configure it in the browser.
@@ -163,7 +169,7 @@ Render one screen:
 ./dev-local/eink_emulator.sh --profile e290 --screen main --out /tmp/block-clock-main.svg
 ```
 
-Supported screens: `main`, `loading`, `welcome`, `setup`, `saved`, `reset`. The generated gallery is written under `dev-local/eink-screens/`, which is ignored by git.
+Supported screens: `main` (price), `network`, `supply`, `loading`, `welcome`, `setup`, `saved`, `reset`. The generated gallery is written under `dev-local/eink-screens/`, which is ignored by git.
 
 ## Code Structure
 
