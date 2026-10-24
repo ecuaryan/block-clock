@@ -8,11 +8,14 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cstring>
+#include "font_metrics.h"
 
 using String = std::string;
 
 struct GFXfont {
   bool bold;
+  int metricsIndex;  // 0 FreeSans24, 1 FreeSansBold24, 2 FreeSans18, 3 FreeSansBold18
 };
 
 class IPAddress {
@@ -74,18 +77,60 @@ public:
   void setRotation(int) {}
   void setWindow(int, int, int, int) {}
   void clearMemory() { elements.clear(); }
-  void setTextColor(uint16_t foreground, uint16_t) { textColor = foreground; }
+  void setTextColor(uint16_t color) { textColor = textBg = color; }  // transparent: bg == color
+  void setTextColor(uint16_t foreground, uint16_t background) { textColor = foreground; textBg = background; }
   void setTextSize(int size) { textSize = std::max(1, size); }
   void setFont(const void* font = nullptr) {
-    customFont = font != nullptr;
-    customBold = font && static_cast<const GFXfont*>(font)->bold;
+    customFont = static_cast<const GFXfont*>(font);
+  }
+  static const int16_t (*metricsFor(const GFXfont* font))[5] {
+    switch (font->metricsIndex) {
+      case 0: return FONT_METRICS_FreeSans24;
+      case 1: return FONT_METRICS_FreeSansBold24;
+      case 2: return FONT_METRICS_FreeSans18;
+      default: return FONT_METRICS_FreeSansBold18;
+    }
+  }
+  static double fontEmPx(const GFXfont* font) {
+    // Em size that makes Arial digits as tall as the font's digits.
+    switch (font->metricsIndex) {
+      case 0: return 47.5;
+      case 1: return 48.9;
+      case 2: return 34.9;
+      default: return 34.9;
+    }
+  }
+  int customAdvance(char character) const {
+    if (character < 0x20 || character > 0x7E) return 0;
+    return metricsFor(customFont)[character - 0x20][2] * textSize;
   }
   void getTextBounds(const char* text, int16_t, int16_t, int16_t* boundsX, int16_t* boundsY,
                      uint16_t* boundsW, uint16_t* boundsH) const {
-    if (boundsX) *boundsX = 0;
-    if (boundsY) *boundsY = customFont ? -35 : -8;
-    if (boundsW) *boundsW = (uint16_t)(text ? std::strlen(text) * (customFont ? 26 : 6 * textSize) : 0);
-    if (boundsH) *boundsH = customFont ? 42 : (uint16_t)(8 * textSize);
+    if (!customFont) {
+      if (boundsX) *boundsX = 0;
+      if (boundsY) *boundsY = -8;
+      if (boundsW) *boundsW = (uint16_t)(text ? std::strlen(text) * 6 * textSize : 0);
+      if (boundsH) *boundsH = (uint16_t)(8 * textSize);
+      return;
+    }
+    const auto* table = metricsFor(customFont);
+    int cursor = 0, left = 0, right = 0, top = 0, bottom = 0;
+    bool first = true;
+    for (const char* c = text ? text : ""; *c; c++) {
+      if (*c < 0x20 || *c > 0x7E) continue;
+      const int16_t* g = table[*c - 0x20];
+      if (g[0] > 0 && g[1] > 0) {
+        const int glyphLeft = cursor + g[3] * textSize, glyphRight = glyphLeft + g[0] * textSize;
+        const int glyphTop = g[4] * textSize, glyphBottom = glyphTop + g[1] * textSize;
+        if (first) { left = glyphLeft; right = glyphRight; top = glyphTop; bottom = glyphBottom; first = false; }
+        else { left = std::min(left, glyphLeft); right = std::max(right, glyphRight); top = std::min(top, glyphTop); bottom = std::max(bottom, glyphBottom); }
+      }
+      cursor += g[2] * textSize;
+    }
+    if (boundsX) *boundsX = (int16_t)left;
+    if (boundsY) *boundsY = (int16_t)top;
+    if (boundsW) *boundsW = (uint16_t)(right - left);
+    if (boundsH) *boundsH = (uint16_t)(bottom - top);
   }
   void setCursor(int x, int y) { cursorX = x; cursorY = y; }
   void fastmodeOn(bool) {}
@@ -127,15 +172,37 @@ public:
   void print(const char* text) {
     if (!text) return;
     std::ostringstream element;
-        element << "<text x=\"" << cursorX << "\" y=\""
-          << (customFont ? cursorY : cursorY + 8 * textSize)
-          << "\" fill=\"" << svgColor(textColor) << "\" font-family=\""
-          << (customFont ? "Arial, Helvetica, sans-serif" : "monospace") << "\""
-          << (customBold ? " font-weight=\"bold\"" : "")
-          << " font-size=\"" << (customFont ? 42 : 10 * textSize) << "\" xml:space=\"preserve\">"
-            << escapeXml(text) << "</text>";
+    if (customFont) {
+      int width = 0;
+      for (const char* c = text; *c; c++) width += customAdvance(*c);
+      element << "<text x=\"" << cursorX << "\" y=\"" << cursorY << "\" fill=\"" << svgColor(textColor)
+              << "\" font-family=\"Arial, Helvetica, sans-serif\"" << (customFont->bold ? " font-weight=\"bold\"" : "")
+              << " font-size=\"" << (fontEmPx(customFont) * textSize) << "\" textLength=\"" << width
+              << "\" lengthAdjust=\"spacing\" xml:space=\"preserve\">" << escapeXml(text) << "</text>";
+      cursorX += width;
+    } else {
+      // Built-in font, drawn the way heltec-eink-modules draws it, one character at a time.
+      const bool opaque = textBg != textColor;
+      for (const char* c = text; *c; c++) {
+        if (opaque) {
+          fillRect(cursorX, cursorY, 6 * textSize, 8 * textSize, textBg);
+          // The library fills the spacing column of size-1 text with fillRect(x + 5, y, 8, 1, bg):
+          // a horizontal bar 8 wide instead of a vertical line 8 tall.
+          if (textSize == 1) fillRect(cursorX + 5, cursorY, 8, 1, textBg);
+        }
+        if (*c != ' ') {
+          std::ostringstream glyph;
+          glyph << "<text x=\"" << cursorX << "\" y=\"" << (cursorY + 7 * textSize)
+                << "\" fill=\"" << svgColor(textColor) << "\" font-family=\"monospace\""
+                << " font-size=\"" << (10 * textSize) << "\" xml:space=\"preserve\">"
+                << escapeXml(std::string(1, *c)) << "</text>";
+          elements.push_back(glyph.str());
+        }
+        cursorX += 6 * textSize;
+      }
+      return;
+    }
     elements.push_back(element.str());
-        cursorX += (int)std::strlen(text) * (customFont ? 26 : 6 * textSize);
   }
 
   void print(const String& text) { print(text.c_str()); }
@@ -162,8 +229,8 @@ private:
   int cursorY = 0;
   int textSize = 1;
   uint16_t textColor = BLACK;
-  bool customFont = false;
-  bool customBold = false;
+  uint16_t textBg = WHITE;
+  const GFXfont* customFont = nullptr;
 };
 
 static SvgDisplay display;
@@ -273,6 +340,9 @@ static BlockData demoData() {
   data.mediumFeeSatVb = 1.169f;
   data.highFeeSatVb = 2.175f;
   data.lastBlockTimestamp = std::time(nullptr) - (12 * 60);
+  data.lastBlockFeesSats = 8420000;
+  data.athPrice = 126080;
+  data.athTimestamp = std::time(nullptr) - (383L * 86400);
   data.updatedAt = std::time(nullptr);
   data.wifiOk = true;
   data.dataOk = true;
@@ -280,13 +350,13 @@ static BlockData demoData() {
 }
 
 static void renderScreen(const std::string& screen) {
-  if (screen == "main") {
+  if (screen == "main" || screen == "network" || screen == "supply") {
     BlockData data = demoData();
     deviceConfig.configured = true;
     deviceConfig.currencyCode = DEFAULT_CURRENCY_CODE;
     deviceConfig.displayThemeMode = DEFAULT_DISPLAY_THEME_MODE;
     deviceConfig.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
-    drawBlockDashboard(data, deviceConfig);
+    drawBlockDashboard(data, deviceConfig, screen == "network" ? 1 : screen == "supply" ? 2 : 0);
   } else if (screen == "loading") {
     drawBrandedStatusScreen("CONNECTING", "Fetching data", false);
   } else if (screen == "welcome") {
@@ -310,7 +380,7 @@ int main(int argc, char** argv) {
   for (int index = 1; index < argc; index++) {
     const std::string argument = argv[index];
     if (argument == "--help" || argument == "-h") {
-      std::cout << "Usage: eink_emulator [--profile e290|e213] [--screen main|loading|welcome|setup|saved|reset] [--out path.svg]\n";
+      std::cout << "Usage: eink_emulator [--profile e290|e213] [--screen main|network|supply|loading|welcome|setup|saved|reset] [--out path.svg]\n";
       return 0;
     }
     if ((argument == "--profile" || argument == "--screen" || argument == "--out") && index + 1 < argc) {
