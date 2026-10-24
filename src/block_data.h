@@ -253,6 +253,31 @@ static bool parseIsoUtc(const char* text, time_t& out) {
   return out > 0;
 }
 
+// The all-time high rarely changes, so it is kept in flash. A hard reset or power loss clears RTC
+// memory, and CoinGecko can turn the first request after that away with a rate limit.
+static void loadSavedAth(const DeviceConfig& cfg, BlockData& data) {
+  if (data.athPrice > 0) return;
+  if (!preferences.begin(CONFIG_NAMESPACE, true)) return;
+  const long price = (long)preferences.getLong("ath_price", 0);
+  const uint8_t currency = preferences.getUChar("ath_cur", 255);
+  if (price > 0 && currency == cfg.currencyCode) {
+    data.athPrice = price;
+    data.athTimestamp = (time_t)preferences.getLong64("ath_time", 0);
+    data.athCheckedAt = (time_t)preferences.getLong64("ath_chk", 0);
+    data.athCurrency = currency;
+  }
+  preferences.end();
+}
+
+static void saveAth(const BlockData& data) {
+  if (!preferences.begin(CONFIG_NAMESPACE, false)) return;
+  preferences.putLong("ath_price", (int32_t)data.athPrice);
+  preferences.putLong64("ath_time", (int64_t)data.athTimestamp);
+  preferences.putLong64("ath_chk", (int64_t)data.athCheckedAt);
+  preferences.putUChar("ath_cur", data.athCurrency);
+  preferences.end();
+}
+
 // The all-time high and its date, from CoinGecko. Checked every few hours, not every wake.
 static void fetchCoinGeckoAth(const DeviceConfig& cfg, BlockData& outData) {
   const time_t now = time(nullptr);
@@ -284,6 +309,7 @@ static void fetchCoinGeckoAth(const DeviceConfig& cfg, BlockData& outData) {
   outData.athPrice = lround(ath);
   outData.athTimestamp = athTime;
   outData.athCurrency = cfg.currencyCode;
+  saveAth(outData);
 }
 
 static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {

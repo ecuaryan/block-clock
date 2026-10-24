@@ -376,6 +376,7 @@ void setup() {
   }
 
   BlockData data = rtcHasBlockData ? rtcBlockData : emptyBlockData();
+  loadSavedAth(deviceConfig, data);
   data.batteryVoltage = batteryVoltage;
   data.batteryPercent = batteryPercent;
   data.wifiOk = true;
