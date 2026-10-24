@@ -2,3 +2,4 @@
 secrets.h
 dev-local/.build/
 dev-local/eink-screens/
+build/
