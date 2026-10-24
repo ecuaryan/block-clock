@@ -103,7 +103,7 @@ There is no setup PIN. Block Clock does not store personal financial data.
 
 The clock stays on the screen you picked when it refreshes on its timer.
 
-On the printed case the buttons carry icons: the square frame is `SETUP`, the X is `FUNCTION`, and the ring is `HOME` (RST).
+On the printed case the buttons carry icons: the square frame is `SETUP`, the X is `FUNCTION`, and the ring is `HOME` (RST). `HOME` reboots the clock: it clears the saved state, fetches fresh data, and returns to the Price screen.
 
 Avoid holding `SETUP` while pressing `HOME` (RST); on ESP32 boards that combination can enter the bootloader used for flashing firmware.
 
