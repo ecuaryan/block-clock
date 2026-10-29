@@ -145,6 +145,39 @@ static uint8_t sanitizeTimezoneIndex(uint8_t rawValue) {
   return rawValue < TIMEZONE_OPTION_COUNT ? rawValue : DEFAULT_TIMEZONE_INDEX;
 }
 
+static bool hourIsQuiet(const DeviceConfig& cfg, int hour) {
+  if (!cfg.quietHoursEnabled || cfg.quietStartHour == cfg.quietEndHour) return false;
+  if (cfg.quietStartHour < cfg.quietEndHour) return hour >= cfg.quietStartHour && hour < cfg.quietEndHour;
+  return hour >= cfg.quietStartHour || hour < cfg.quietEndHour;
+}
+
+static bool nowIsQuiet(const DeviceConfig& cfg) {
+  const time_t now = time(nullptr);
+  struct tm local = {};
+  if (!cfg.quietHoursEnabled || now < 1700000000 || !localtime_r(&now, &local)) return false;
+  return hourIsQuiet(cfg, local.tm_hour);
+}
+
+// If the wake that `seconds` from now would land inside quiet hours, push it out to the end of the window.
+static uint32_t skipQuietHours(const DeviceConfig& cfg, uint32_t seconds) {
+  const time_t now = time(nullptr);
+  if (!cfg.quietHoursEnabled || now < 1700000000) return seconds;
+  const time_t target = now + (time_t)seconds;
+  struct tm local = {};
+  if (!localtime_r(&target, &local) || !hourIsQuiet(cfg, local.tm_hour)) return seconds;
+  local.tm_hour = cfg.quietEndHour;
+  local.tm_min = 0;
+  local.tm_sec = 0;
+  local.tm_isdst = -1;
+  time_t wake = mktime(&local);
+  if (wake <= target) {
+    local.tm_mday += 1;
+    local.tm_isdst = -1;
+    wake = mktime(&local);
+  }
+  return wake > now ? (uint32_t)(wake - now) : seconds;
+}
+
 static CurrencyCode sanitizeCurrencyCode(uint8_t rawValue) {
   switch (rawValue) {
     case CURRENCY_EUR:
@@ -239,6 +272,8 @@ static void normalizeDeviceConfig(DeviceConfig& cfg) {
   cfg.timezoneIndex = sanitizeTimezoneIndex(cfg.timezoneIndex);
   if (cfg.batteryDisplayMode > BATTERY_DISPLAY_ICON_PERCENT) cfg.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
   cfg.displayThemeMode = (uint8_t)sanitizeThemeMode(cfg.displayThemeMode);
+  cfg.quietStartHour = (uint8_t)clampInt(cfg.quietStartHour, 0, 23);
+  cfg.quietEndHour = (uint8_t)clampInt(cfg.quietEndHour, 0, 23);
   cfg.refreshIntervalMinutes = (uint16_t)clampInt(
     (int)cfg.refreshIntervalMinutes,
     MIN_REFRESH_INTERVAL_MINUTES,
@@ -263,6 +298,9 @@ static void applyDefaultDeviceConfig(DeviceConfig& cfg) {
   cfg.displayThemeMode = (uint8_t)DEFAULT_DISPLAY_THEME_MODE;
   cfg.refreshIntervalMinutes = DEFAULT_REFRESH_INTERVAL_MINUTES;
   cfg.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
+  cfg.quietHoursEnabled = false;
+  cfg.quietStartHour = DEFAULT_QUIET_START_HOUR;
+  cfg.quietEndHour = DEFAULT_QUIET_END_HOUR;
   safeCopyCString(cfg.mqttServer, sizeof(cfg.mqttServer), DEFAULT_MQTT_SERVER);
   cfg.mqttPort = DEFAULT_MQTT_PORT;
   safeCopyCString(cfg.mqttUser, sizeof(cfg.mqttUser), DEFAULT_MQTT_USER);
@@ -292,6 +330,9 @@ static bool loadDeviceConfig(DeviceConfig& cfg) {
   // "showbatt" is the legacy bool (percent on/off, icon always drawn).
   const uint32_t legacyBatteryMode = preferences.getBool("showbatt", true) ? BATTERY_DISPLAY_ICON_PERCENT : BATTERY_DISPLAY_ICON;
   cfg.batteryDisplayMode = (uint8_t)preferences.getUInt("battmode", legacyBatteryMode);
+  cfg.quietHoursEnabled = preferences.getBool("quiet_on", false);
+  cfg.quietStartHour    = (uint8_t)preferences.getUInt("quiet_start", DEFAULT_QUIET_START_HOUR);
+  cfg.quietEndHour      = (uint8_t)preferences.getUInt("quiet_end",   DEFAULT_QUIET_END_HOUR);
   preferences.getString("mqttsrv",     cfg.mqttServer,     sizeof(cfg.mqttServer));
   cfg.mqttPort          = (uint16_t)preferences.getUInt("mqttport",  DEFAULT_MQTT_PORT);
   preferences.getString("mqttuser",    cfg.mqttUser,       sizeof(cfg.mqttUser));
@@ -326,6 +367,9 @@ static bool saveDeviceConfig(const DeviceConfig& cfg) {
   preferences.putUInt("theme",      (uint32_t)copy.displayThemeMode);
   preferences.putUInt("refreshmin", (uint32_t)copy.refreshIntervalMinutes);
   preferences.putUInt("battmode",   (uint32_t)copy.batteryDisplayMode);
+  preferences.putBool("quiet_on",    copy.quietHoursEnabled);
+  preferences.putUInt("quiet_start", (uint32_t)copy.quietStartHour);
+  preferences.putUInt("quiet_end",   (uint32_t)copy.quietEndHour);
   preferences.putString("mqttsrv",  copy.mqttServer);
   preferences.putUInt("mqttport",   (uint32_t)copy.mqttPort);
   preferences.putString("mqttuser", copy.mqttUser);

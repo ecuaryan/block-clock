@@ -344,6 +344,7 @@ static BlockData demoData() {
   data.athPrice = 126080;
   data.athTimestamp = std::time(nullptr) - (383L * 86400);
   data.updatedAt = std::time(nullptr);
+  data.nextRefreshAt = data.updatedAt + 10 * 60;
   data.wifiOk = true;
   data.dataOk = true;
   return data;

@@ -103,6 +103,8 @@ There is no setup PIN. Block Clock does not store personal financial data.
 
 The clock stays on the screen you picked when it refreshes on its timer.
 
+**Quiet hours** (optional, in the setup portal) pause timer refreshes overnight so the screen is not redrawing while nobody is looking. A button press during quiet hours still fetches live data. Every screen shows `next h:mm AM/PM` in the footer, the time of the next planned refresh; if the clock is past that time, it is stuck.
+
 On the printed case the buttons carry icons: the square frame is `SETUP`, the X is `FUNCTION`, and the ring is `HOME` (RST). `HOME` reboots the clock: it clears the saved state, fetches fresh data, and returns to the Price screen.
 
 Avoid holding `SETUP` while pressing `HOME` (RST); on ESP32 boards that combination can enter the bootloader used for flashing firmware.

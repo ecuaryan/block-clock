@@ -196,17 +196,19 @@ static void goToSleepForSeconds(uint32_t seconds) {
   esp_deep_sleep_start();
 }
 
-static void goToSleep(uint16_t refreshMinutes) {
-  goToSleepForSeconds((uint32_t)refreshMinutes * 60UL);
+// Unix time of a wake `seconds` from now, or 0 while the clock has no valid time.
+static time_t wakeTimeAfter(uint32_t seconds) {
+  const time_t now = time(nullptr);
+  return now >= 1700000000 ? now + (time_t)seconds : 0;
 }
 
 // Time left in the current refresh interval, so flipping screens never postpones the next refresh.
 static uint32_t secondsUntilNextRefresh() {
   const uint32_t interval = (uint32_t)deviceConfig.refreshIntervalMinutes * 60UL;
   const time_t now = time(nullptr);
-  if (now < 1700000000 || rtcLastKnownUnixTime < 1700000000 || now < rtcLastKnownUnixTime) return interval;
+  if (now < 1700000000 || rtcLastKnownUnixTime < 1700000000 || now < rtcLastKnownUnixTime) return skipQuietHours(deviceConfig, interval);
   const uint32_t elapsed = (uint32_t)(now - rtcLastKnownUnixTime);
-  return elapsed + 5 >= interval ? 5 : interval - elapsed;
+  return skipQuietHours(deviceConfig, elapsed + 5 >= interval ? 5 : interval - elapsed);
 }
 
 static bool functionButtonHeld(uint32_t holdMs) {
@@ -224,9 +226,11 @@ static void showNextScreenAndSleep(float batteryVoltage, int batteryPercent) {
   BlockData data = rtcBlockData;
   data.batteryVoltage = batteryVoltage;
   data.batteryPercent = batteryPercent;
+  const uint32_t sleepSeconds = secondsUntilNextRefresh();
+  data.nextRefreshAt = wakeTimeAfter(sleepSeconds);
   clearScreenRenderWindow();
   drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
-  goToSleepForSeconds(secondsUntilNextRefresh());
+  goToSleepForSeconds(sleepSeconds);
 }
 
 static void goToWelcomeSleep() {
@@ -336,7 +340,13 @@ void setup() {
   rtcBatteryPercent = batteryPercent;
 
   // A quick tap on FUNCTION or SETUP flips screens from cache; holding FUNCTION falls through to a full refresh.
-  if (manualWake && rtcHasBlockData && !(functionWake && functionButtonHeld(FUNCTION_LONG_PRESS_MS))) {
+  // During quiet hours a tap means someone is looking, so it fetches live data instead of flipping from a stale cache.
+  const bool quietTap = manualWake && nowIsQuiet(deviceConfig);
+  if (quietTap && !functionWake) {
+    rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+  } else if (quietTap) {
+    if (!functionButtonHeld(FUNCTION_LONG_PRESS_MS)) rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+  } else if (manualWake && rtcHasBlockData && !(functionWake && functionButtonHeld(FUNCTION_LONG_PRESS_MS))) {
     showNextScreenAndSleep(batteryVoltage, batteryPercent);
     return;
   }
@@ -367,6 +377,7 @@ void setup() {
     pending.wifiOk = true;
     pending.dataOk = false;
     pending.updatedAt = 0;
+    pending.nextRefreshAt = 0;
     clearScreenRenderWindow();
     drawBlockDashboard(pending, deviceConfig, rtcScreenIndex);
     pendingFrameDrawn = true;
@@ -412,6 +423,9 @@ void setup() {
     rtcHasBlockData = true;
   }
 
+  const uint32_t sleepSeconds = skipQuietHours(deviceConfig, (uint32_t)deviceConfig.refreshIntervalMinutes * 60UL);
+  data.nextRefreshAt = wakeTimeAfter(sleepSeconds);
+
   if (pendingFrameDrawn) {
     // Partial refresh: full-screen window (avoids partial-window edge artifacts),
     // fastmode on, draw (prepareScreen uses fillRect not clearMemory, keeping the
@@ -427,7 +441,7 @@ void setup() {
     drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
   }
   disconnectNetwork();
-  goToSleep(deviceConfig.refreshIntervalMinutes);
+  goToSleepForSeconds(sleepSeconds);
 }
 
 void loop() {

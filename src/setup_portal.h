@@ -197,7 +197,29 @@ static String portalPage() {
   html += selectedAttr(refreshUnit == REFRESH_INTERVAL_UNIT_HOURS);
   html += F(">Hours</option><option value=\"2\"");
   html += selectedAttr(refreshUnit == REFRESH_INTERVAL_UNIT_DAYS);
-  html += F(">Days</option></select></div><div class=\"hint\">Shorter intervals use more battery.</div></div></div></section>");
+  html += F(">Days</option></select></div><div class=\"hint\">Shorter intervals use more battery.</div></div></div>");
+  html += F("<div class=\"grid\" style=\"margin-top:14px\"><div><label for=\"quiet_hours\">Quiet hours</label><select id=\"quiet_hours\" name=\"quiet_hours\"><option value=\"0\"");
+  html += selectedAttr(!deviceConfig.quietHoursEnabled);
+  html += F(">Off</option><option value=\"1\"");
+  html += selectedAttr(deviceConfig.quietHoursEnabled);
+  html += F(">Pause refreshing</option></select><div class=\"hint\">No refreshes during these hours, so the screen stops flashing overnight. It keeps its last image, and a button press still refreshes.</div></div><div><label>From / until (local time)</label><div class=\"dual\">");
+  for (uint8_t which = 0; which < 2; which++) {
+    const uint8_t selectedHour = which == 0 ? deviceConfig.quietStartHour : deviceConfig.quietEndHour;
+    html += which == 0 ? F("<select name=\"quiet_start\">") : F("<select name=\"quiet_end\">");
+    for (uint8_t hour = 0; hour < 24; hour++) {
+      html += F("<option value=\"");
+      html += String(hour);
+      html += F("\"");
+      html += selectedAttr(selectedHour == hour);
+      html += F(">");
+      const int hour12 = (hour % 12) == 0 ? 12 : (hour % 12);
+      html += String(hour12);
+      html += hour < 12 ? F(" AM") : F(" PM");
+      html += F("</option>");
+    }
+    html += F("</select>");
+  }
+  html += F("</div></div></div></section>");
 
   // ── MQTT ──────────────────────────────────────────────────────────────────
   html += F("<section id=\"mqtt_settings\" class=\"card\"><h2>MQTT</h2>");
@@ -320,6 +342,9 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
     MIN_REFRESH_INTERVAL_MINUTES,
     MAX_REFRESH_INTERVAL_MINUTES
   );
+  cfg.quietHoursEnabled = portalServer.arg("quiet_hours") == "1";
+  cfg.quietStartHour = (uint8_t)clampInt(portalServer.arg("quiet_start").toInt(), 0, 23);
+  cfg.quietEndHour = (uint8_t)clampInt(portalServer.arg("quiet_end").toInt(), 0, 23);
   cfg.batteryDisplayMode = (uint8_t)clampInt(portalServer.arg("battery_mode").toInt(), BATTERY_DISPLAY_HIDDEN, BATTERY_DISPLAY_ICON_PERCENT);
   safeCopyString(cfg.mqttServer, sizeof(cfg.mqttServer), portalServer.arg("mqtt_server"));
   cfg.mqttPort = parsePort(portalServer.arg("mqtt_port"), DEFAULT_MQTT_PORT);

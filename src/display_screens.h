@@ -512,13 +512,34 @@ static void drawApproxText(const char* text, int x, int y, int size, const Displ
   display.print(text ? text : "");
 }
 
-// Footer: what this screen is about (left) and which of the screens it is (right).
-static void drawFooter(int current, const char* title, const DisplayThemeColors& theme) {
+// "next 6:00 AM", or "next Sat 6:00 AM" when that is not today: lets a glance tell a sleeping clock from a dead one.
+static void formatNextRefresh(time_t when, char* output, size_t outputSize) {
+  output[0] = '\0';
+  const time_t now = time(nullptr);
+  struct tm next = {};
+  struct tm today = {};
+  if (when < 1700000000 || now < 1700000000 || !localtime_r(&when, &next) || !localtime_r(&now, &today)) return;
+  const int hour12 = (next.tm_hour % 12) == 0 ? 12 : (next.tm_hour % 12);
+  const char* meridiem = next.tm_hour < 12 ? "AM" : "PM";
+  if (next.tm_yday == today.tm_yday && next.tm_year == today.tm_year) {
+    snprintf(output, outputSize, "next %d:%02d %s", hour12, next.tm_min, meridiem);
+  } else {
+    char weekday[8];
+    strftime(weekday, sizeof(weekday), "%a", &next);
+    snprintf(output, outputSize, "next %s %d:%02d %s", weekday, hour12, next.tm_min, meridiem);
+  }
+}
+
+// Footer: what this screen is about (left), when the next refresh is due, and which screen this is (right).
+static void drawFooter(int current, const char* title, const DisplayThemeColors& theme, time_t nextRefreshAt) {
   static constexpr int DOT = 5;
   static constexpr int PITCH = 9;
   const int y = DEVICE_DISPLAY_HEIGHT - 13;  // clear of the case lip
   drawTextSize1(title, DASH_MARGIN, y);
   const int left = DEVICE_DISPLAY_WIDTH - DASH_MARGIN - ((DASHBOARD_SCREEN_COUNT * PITCH) - (PITCH - DOT));
+  char nextText[24];
+  formatNextRefresh(nextRefreshAt, nextText, sizeof(nextText));
+  if (nextText[0]) drawTextSize1(nextText, left - 8 - estimateTextWidthSize1(nextText), y);
   for (int index = 0; index < DASHBOARD_SCREEN_COUNT; index++) {
     const int x = left + (index * PITCH);
     display.fillRect(x, y + 1, DOT, DOT, theme.foreground);
@@ -625,7 +646,7 @@ static void drawPriceScreen(const BlockData& data, const DeviceConfig& cfg) {
   drawSizedText(fromAth, CELL_X[2], CELL_Y + 12, 2);
   drawTextSize1(athAge, CELL_X[2], CELL_Y + 31);
 
-  drawFooter(0, "WHAT IT IS WORTH", theme);
+  drawFooter(0, "WHAT IT IS WORTH", theme, data.nextRefreshAt);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }
@@ -706,7 +727,7 @@ static void drawNetworkScreen(const BlockData& data, const DeviceConfig& cfg) {
   }
   drawTextSize1("sat/vB", DASH_MARGIN + (3 * feeColumnWidth) + 4, 103);
 
-  drawFooter(1, "THE NETWORK RIGHT NOW", theme);
+  drawFooter(1, "THE NETWORK RIGHT NOW", theme, data.nextRefreshAt);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }
@@ -783,7 +804,7 @@ static void drawSupplyScreen(const BlockData& data, const DeviceConfig& cfg) {
   drawApproxText(perDay, CELL_X[2], CELL_Y + 12, 2, theme);
   drawTextSize1("BTC per day", CELL_X[2], CELL_Y + 31);
 
-  drawFooter(2, "HOW SCARCE IT IS", theme);
+  drawFooter(2, "HOW SCARCE IT IS", theme, data.nextRefreshAt);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }

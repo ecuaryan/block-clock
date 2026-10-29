@@ -77,6 +77,9 @@ struct DeviceConfig {
   uint8_t displayThemeMode;
   uint16_t refreshIntervalMinutes;
   uint8_t batteryDisplayMode;
+  bool quietHoursEnabled;
+  uint8_t quietStartHour;  // local hour 0-23 when quiet hours begin
+  uint8_t quietEndHour;    // local hour 0-23 when refreshing resumes
   char mqttServer[64];
   uint16_t mqttPort;
   char mqttUser[64];
@@ -104,6 +107,7 @@ struct BlockData {
   float batteryVoltage;
   int batteryPercent;
   time_t updatedAt;
+  time_t nextRefreshAt;       // when the clock plans to wake and refresh, 0 when unknown
   bool wifiOk;
   bool dataOk;
 };
@@ -137,6 +141,8 @@ static constexpr uint16_t BATTERY_ADC_SETTLE_DELAY_MS = 5;
 static constexpr uint16_t MIN_REFRESH_INTERVAL_MINUTES = 1;
 static constexpr uint16_t MAX_REFRESH_INTERVAL_MINUTES = 10080;
 static constexpr uint16_t DEFAULT_REFRESH_INTERVAL_MINUTES = 10;
+static constexpr uint8_t DEFAULT_QUIET_START_HOUR = 23;
+static constexpr uint8_t DEFAULT_QUIET_END_HOUR = 6;
 
 static constexpr char DEFAULT_MQTT_SERVER[] = "mqtt.local";
 static constexpr uint16_t DEFAULT_MQTT_PORT = 1883;
