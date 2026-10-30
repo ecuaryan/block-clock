@@ -6,21 +6,39 @@ static bool gotHashrate = false;
 static bool gotPrice = false;
 static BlockData* mqttTargetData = nullptr;
 
-static bool connectWiFi(const DeviceConfig& cfg, uint16_t timeoutMs, bool keepPortalAp) {
-  if (!hasText(cfg.wifiSsid)) return false;
-
+static bool connectToNetwork(const char* ssid, const char* pass, uint16_t timeoutMs, bool keepPortalAp) {
   WiFi.persistent(false);
   WiFi.setSleep(false);
   WiFi.mode(keepPortalAp ? WIFI_AP_STA : WIFI_STA);
   WiFi.disconnect(false, false);
   delay(150);
-  WiFi.begin(cfg.wifiSsid, cfg.wifiPass);
+  WiFi.begin(ssid, pass);
 
   const uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeoutMs) {
     delay(WIFI_POLL_DELAY_MS);
   }
   return WiFi.status() == WL_CONNECTED;
+}
+
+// Tries the primary network, then the backup. `preferSecondary` remembers which one worked last
+// (pass a pointer to a value kept across deep sleep) so a clock that travels tries its current
+// network first instead of burning a full timeout on the one it left behind.
+static bool connectWiFi(const DeviceConfig& cfg, uint16_t timeoutMs, bool keepPortalAp, bool* preferSecondary = nullptr) {
+  if (!hasText(cfg.wifiSsid)) return false;
+  const bool hasSecondary = hasText(cfg.wifiSsid2);
+  const bool secondFirst = hasSecondary && preferSecondary && *preferSecondary;
+
+  for (int attempt = 0; attempt < (hasSecondary ? 2 : 1); attempt++) {
+    const bool useSecondary = secondFirst ? attempt == 0 : attempt == 1;
+    const char* ssid = useSecondary ? cfg.wifiSsid2 : cfg.wifiSsid;
+    const char* pass = useSecondary ? cfg.wifiPass2 : cfg.wifiPass;
+    if (connectToNetwork(ssid, pass, timeoutMs, keepPortalAp)) {
+      if (preferSecondary) *preferSecondary = useSecondary;
+      return true;
+    }
+  }
+  return false;
 }
 
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {

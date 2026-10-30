@@ -587,7 +587,7 @@ static void drawPriceScreen(const BlockData& data, const DeviceConfig& cfg) {
   const int satsGroupW = ((int)strlen(satsNumber) * 12) + 6 + estimateTextWidthSize1(satsUnit);
   drawValueUnit(satsNumber, satsUnit, ((DASH_MARGIN + centerX) / 2) - (satsGroupW / 2), TIER2_Y, 2);
 
-  const String timestamp = formatTimestamp(nowT >= 1700000000 ? nowT : data.updatedAt);
+  const String timestamp = formatTimestamp(data.updatedAt);
   char clockText[16];
   char dateText[16] = "";
   const char* comma = strchr(timestamp.c_str(), ',');

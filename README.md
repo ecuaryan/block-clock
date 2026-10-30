@@ -84,7 +84,7 @@ http://192.168.4.1
 
 The setup page lets you configure:
 
-- Wi-Fi network and password
+- Wi-Fi network and password, plus an optional backup network (for example a phone hotspot). The clock tries the network that worked last, then the other; if neither is reachable it retries every 15 minutes at most, however long the refresh interval is
 - Data source: online or MQTT
 - Currency: USD, EUR, CHF, GBP, CAD, or AUD
 - Refresh interval

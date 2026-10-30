@@ -71,6 +71,8 @@ struct DeviceConfig {
   bool configured;
   char wifiSsid[33];
   char wifiPass[65];
+  char wifiSsid2[33];  // optional backup network, e.g. a phone hotspot
+  char wifiPass2[65];
   uint8_t dataSourceMode;
   uint8_t currencyCode;
   uint8_t timezoneIndex;
@@ -131,6 +133,7 @@ static constexpr uint16_t FUNCTION_LONG_PRESS_MS = 1500;  // hold FUNCTION this 
 static constexpr uint32_t SETUP_PORTAL_HOLD_MS = 3000;    // hold SETUP this long to open setup; a quicker tap cycles screens
 static constexpr uint16_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint16_t WIFI_POLL_DELAY_MS = 250;
+static constexpr uint16_t WIFI_OFFLINE_RETRY_MINUTES = 15;  // longest wait before retrying when no network could be reached
 static constexpr uint16_t MQTT_CONNECT_TIMEOUT_MS = 5000;
 static constexpr uint16_t MQTT_WAIT_FOR_MESSAGES_MS = 5000;
 static constexpr uint16_t MQTT_RETRY_DELAY_MS = 500;

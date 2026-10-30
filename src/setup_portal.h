@@ -173,7 +173,15 @@ static String portalPage() {
   html += F("<div class=\"password-wrap\"><input id=\"wifi_pass\" name=\"wifi_pass\" type=\"password\" maxlength=\"64\" value=\"");
   html += htmlEscape(deviceConfig.wifiPass);
   html += F("\"><button class=\"password-toggle\" type=\"button\" data-password-toggle=\"wifi_pass\">Show</button></div>");
-  html += F("</div></div></div></section>");
+  html += F("</div></div>");
+  html += F("<div><label for=\"wifi_ssid2\">Backup network (optional)</label>");
+  html += F("<div class=\"grid\"><div><input id=\"wifi_ssid2\" name=\"wifi_ssid2\" maxlength=\"32\" placeholder=\"Network name\" value=\"");
+  html += htmlEscape(deviceConfig.wifiSsid2);
+  html += F("\"></div><div><div class=\"password-wrap\"><input id=\"wifi_pass2\" name=\"wifi_pass2\" type=\"password\" maxlength=\"64\" placeholder=\"Password\" value=\"");
+  html += htmlEscape(deviceConfig.wifiPass2);
+  html += F("\"><button class=\"password-toggle\" type=\"button\" data-password-toggle=\"wifi_pass2\">Show</button></div></div></div>");
+  html += F("<div class=\"hint\">Used when the main network is out of reach, such as a phone hotspot when you take the clock with you. The clock only joins 2.4 GHz networks; on an iPhone turn on Maximize Compatibility in Personal Hotspot.</div></div>");
+  html += F("</div></section>");
 
   // ── Display ───────────────────────────────────────────────────────────────
   html += F("<section class=\"card\"><h2>Display</h2><div class=\"grid\"><div>");
@@ -274,7 +282,7 @@ static String portalPage() {
   // ── Password show/hide ─────────────────────────────────────────────────────
   html += F("(function(){");
   html += F("function syncPwToggle(input){var wrap=input&&input.closest?input.closest('.password-wrap'):null;var btn=wrap&&wrap.querySelector?wrap.querySelector('[data-password-toggle]'):null;var has=!!(input&&input.value);if(wrap&&wrap.classList)wrap.classList.toggle('has-secret',has);if(btn){btn.disabled=!has;if(!has){input.type='password';btn.textContent='Show';}}}");
-  html += F("function syncAll(){['wifi_pass','mqtt_pass'].forEach(function(id){var el=document.getElementById(id);if(el)syncPwToggle(el);});}");
+  html += F("function syncAll(){['wifi_pass','wifi_pass2','mqtt_pass'].forEach(function(id){var el=document.getElementById(id);if(el)syncPwToggle(el);});}");
   html += F("document.addEventListener('input',function(e){syncPwToggle(e.target);},true);");
   html += F("document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-password-toggle]');if(!b)return;e.preventDefault();var input=document.getElementById(b.getAttribute('data-password-toggle'));if(!input||!input.value){syncPwToggle(input);return;}var show=input.type==='password';input.type=show?'text':'password';b.textContent=show?'Hide':'Show';},true);");
   html += F("syncAll();");
@@ -332,6 +340,8 @@ static void portalSendJson(bool ok, const char* message) {
 static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
   safeCopyString(cfg.wifiSsid, sizeof(cfg.wifiSsid), portalServer.arg("wifi_ssid"));
   safeCopyString(cfg.wifiPass, sizeof(cfg.wifiPass), portalServer.arg("wifi_pass"));
+  safeCopyString(cfg.wifiSsid2, sizeof(cfg.wifiSsid2), portalServer.arg("wifi_ssid2"));
+  safeCopyString(cfg.wifiPass2, sizeof(cfg.wifiPass2), portalServer.arg("wifi_pass2"));
   cfg.dataSourceMode = portalServer.arg("data_source") == "mqtt" ? DATA_SOURCE_MQTT : DATA_SOURCE_ONLINE;
   cfg.currencyCode = (uint8_t)sanitizeCurrencyCode((uint8_t)portalServer.arg("currency").toInt());
   cfg.timezoneIndex = sanitizeTimezoneIndex((uint8_t)portalServer.arg("timezone").toInt());
@@ -356,6 +366,18 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
   safeCopyString(cfg.topicPriceValue, sizeof(cfg.topicPriceValue), portalServer.arg("topic_price"));
 }
 
+// A backup network that is in range gets a real connection test, so a mistyped password shows up now
+// rather than on the road. One that is out of range (or hidden) cannot be tested and is accepted as typed.
+static bool backupWifiLooksWrong(const DeviceConfig& cfg) {
+  if (!hasText(cfg.wifiSsid2)) return false;
+  WiFi.mode(WIFI_AP_STA);
+  const int found = WiFi.scanNetworks();
+  bool inRange = false;
+  for (int i = 0; i < found && !inRange; i++) inRange = WiFi.SSID(i) == cfg.wifiSsid2;
+  WiFi.scanDelete();
+  return inRange && !connectToNetwork(cfg.wifiSsid2, cfg.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
+}
+
 static void handlePortalValidate() {
   DeviceConfig submitted = deviceConfig;
   loadSubmittedPortalConfig(submitted);
@@ -367,7 +389,15 @@ static void handlePortalValidate() {
     return;
   }
 
-  if (!connectWiFi(submitted, WIFI_CONNECT_TIMEOUT_MS, true)) {
+  if (backupWifiLooksWrong(submitted)) {
+    portalSendJson(false, "Backup Wi-Fi: failed\nThe backup network is in range but would not connect. Check its password, or clear it.");
+    return;
+  }
+
+  // Validate the main network on its own; the backup may legitimately be out of range right now.
+  DeviceConfig primaryOnly = submitted;
+  primaryOnly.wifiSsid2[0] = '\0';
+  if (!connectWiFi(primaryOnly, WIFI_CONNECT_TIMEOUT_MS, true)) {
     portalSendJson(false, "Wi-Fi: failed\nCheck the SSID and password, then try again.");
     return;
   }

@@ -322,6 +322,8 @@ static bool loadDeviceConfig(DeviceConfig& cfg) {
   cfg.configured        = preferences.getBool("cfg_ok", false);
   preferences.getString("wifissid",    cfg.wifiSsid,       sizeof(cfg.wifiSsid));
   preferences.getString("wifipass",    cfg.wifiPass,       sizeof(cfg.wifiPass));
+  preferences.getString("wifissid2",   cfg.wifiSsid2,      sizeof(cfg.wifiSsid2));
+  preferences.getString("wifipass2",   cfg.wifiPass2,      sizeof(cfg.wifiPass2));
   cfg.dataSourceMode    = (uint8_t)preferences.getUInt("datasrc",    DATA_SOURCE_ONLINE);
   cfg.currencyCode      = (uint8_t)preferences.getUInt("currency",   DEFAULT_CURRENCY_CODE);
   cfg.timezoneIndex     = (uint8_t)preferences.getUInt("tz",         DEFAULT_TIMEZONE_INDEX);
@@ -361,6 +363,8 @@ static bool saveDeviceConfig(const DeviceConfig& cfg) {
   }
   preferences.putString("wifissid", copy.wifiSsid);
   preferences.putString("wifipass", copy.wifiPass);
+  preferences.putString("wifissid2", copy.wifiSsid2);
+  preferences.putString("wifipass2", copy.wifiPass2);
   preferences.putUInt("datasrc",    (uint32_t)copy.dataSourceMode);
   preferences.putUInt("currency",   (uint32_t)copy.currencyCode);
   preferences.putUInt("tz",         (uint32_t)copy.timezoneIndex);

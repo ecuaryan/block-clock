@@ -84,6 +84,7 @@
 
 RTC_DATA_ATTR BlockData rtcBlockData = {};
 RTC_DATA_ATTR bool rtcHasBlockData = false;
+RTC_DATA_ATTR bool rtcWifiPreferSecondary = false;
 RTC_DATA_ATTR uint8_t rtcScreenIndex = 0;
 RTC_DATA_ATTR int rtcBatteryPercent = -1;
 RTC_DATA_ATTR float rtcBatteryVoltage = 0.0f;
@@ -394,7 +395,7 @@ void setup() {
   data.dataOk = false;
   data.updatedAt = rtcLastKnownUnixTime;
 
-  bool wifiOk = connectWiFi(deviceConfig, WIFI_CONNECT_TIMEOUT_MS, false);
+  bool wifiOk = connectWiFi(deviceConfig, WIFI_CONNECT_TIMEOUT_MS, false, &rtcWifiPreferSecondary);
 
   bool dataOk = false;
   if (wifiOk) {
@@ -410,20 +411,22 @@ void setup() {
   data.batteryPercent = batteryPercent;
   data.wifiOk = wifiOk;
   data.dataOk = dataOk;
-  data.updatedAt = time(nullptr);
-  if (data.updatedAt < 1700000000 && rtcHasBlockData) {
-    data.updatedAt = rtcBlockData.updatedAt;
-  }
-  if (data.updatedAt >= 1700000000) {
-    rtcLastKnownUnixTime = data.updatedAt;
-  }
+  // updatedAt is when the shown price was fetched, so a failed fetch keeps the old time and the
+  // screen reads as stale; rtcLastKnownUnixTime tracks the wall clock either way.
+  const time_t nowTime = time(nullptr);
+  if (nowTime >= 1700000000) rtcLastKnownUnixTime = nowTime;
+  if (dataOk && nowTime >= 1700000000) data.updatedAt = nowTime;
+  else data.updatedAt = rtcHasBlockData ? rtcBlockData.updatedAt : 0;
 
   if (hasUsefulBlockData(data)) {
     rtcBlockData = data;
     rtcHasBlockData = true;
   }
 
-  const uint32_t sleepSeconds = skipQuietHours(deviceConfig, (uint32_t)deviceConfig.refreshIntervalMinutes * 60UL);
+  // With no network reachable, look again sooner than a long refresh interval would.
+  const uint16_t sleepMinutes = wifiOk ? deviceConfig.refreshIntervalMinutes
+    : (uint16_t)min((int)deviceConfig.refreshIntervalMinutes, (int)WIFI_OFFLINE_RETRY_MINUTES);
+  const uint32_t sleepSeconds = skipQuietHours(deviceConfig, (uint32_t)sleepMinutes * 60UL);
   data.nextRefreshAt = wakeTimeAfter(sleepSeconds);
 
   if (pendingFrameDrawn) {
