@@ -141,6 +141,7 @@ enum SetupBootAction : uint8_t {
 #include "src/block_data.h"
 static void factoryResetAndShowWelcome();
 static void goToWelcomeSleep();
+static void returnFromSetupWithoutChanges();
 #include "src/setup_portal.h"
 
 static bool setupButtonPressed() {
@@ -370,6 +371,45 @@ static void factoryResetAndShowWelcome() {
 }
 
 // One wake: from deep sleep (or power-on) via setup(), or in-process from loop() while USB keeps it awake.
+static void runWake();
+
+// HTTPS needs one large free block; long stretches awake (in-process wakes, the setup web server)
+// can fragment the heap below that, and only a restart puts it back together.
+static bool heapTooFragmentedForHttps() {
+  return ESP.getMaxAllocHeap() < 48 * 1024;
+}
+
+// Setup closed with nothing saved (a button tap or the idle timeout): put the last screen back
+// straight from the kept data instead of restarting, which would drop that data and refetch it
+// all. A refresh that came due while setup was open runs right after.
+static void returnFromSetupWithoutChanges() {
+  WiFi.mode(WIFI_OFF);
+  if (!rtcHasBlockData || heapTooFragmentedForHttps()) {
+    // Nothing to put back (or no room for the next fetch): restart into a fresh fetch, as after a save.
+    drawSetupClosedScreen();
+    setPostSaveRestartPending(true);
+    delay(CONFIG_PORTAL_RESTART_DELAY_MS);
+    ESP.restart();
+  }
+  if (rtcScreenIndex >= dashboardScreenCount(deviceConfig)) rtcScreenIndex = 0;
+  const uint32_t refreshSeconds = secondsUntilNextRefresh();
+  BlockData data = rtcBlockData;
+  data.batteryVoltage = rtcBatteryVoltage;
+  data.batteryPercent = rtcBatteryPercent;
+  data.nextRefreshAt = wakeTimeAfter(refreshSeconds);
+  clearScreenRenderWindow();
+  drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
+  Serial.printf("[BlockClock] back from setup without changes (next refresh in %lus)\n", (unsigned long)refreshSeconds);
+  if (refreshSeconds <= 5) {
+    // Due now: run the refresh as a timer wake would, in this same boot.
+    simulatedWake = SIMULATED_WAKE_TIMER;
+    runWake();
+    simulatedWake = SIMULATED_WAKE_NONE;  // only reached while USB keeps the clock awake
+    return;
+  }
+  goToSleepForSeconds(sleepSecondsWithRotation(refreshSeconds));
+}
+
 static void runWake() {
   const SetupBootAction bootAction = detectSetupBootAction();
 
@@ -601,7 +641,7 @@ void loop() {
   usbWaitActive = false;
   // Days of in-process wakes can fragment the heap; HTTPS needs a large free block, so start
   // clean if it runs short (the next boot fetches fresh data and redraws).
-  if (ESP.getMaxAllocHeap() < 48 * 1024) {
+  if (heapTooFragmentedForHttps()) {
     Serial.printf("[BlockClock] largest free heap block %u bytes: restarting\n", (unsigned)ESP.getMaxAllocHeap());
     Serial.flush();
     ESP.restart();

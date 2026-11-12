@@ -758,10 +758,8 @@ static void runSetupPortal() {
       goToWelcomeSleep();
       return;
     }
-    drawSetupClosedScreen();
-    setPostSaveRestartPending(true);  // the restart draws loading placeholders right away, as after a save
-    delay(CONFIG_PORTAL_RESTART_DELAY_MS);
-    ESP.restart();
+    returnFromSetupWithoutChanges();
+    return;
   }
 
   if (portalFactoryResetRequested) {
