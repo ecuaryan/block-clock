@@ -66,11 +66,33 @@ static void appendPortalBrandHeader(String& html) {
   html += F("</svg><h1>BLOCK CLOCK</h1></div>");
 }
 
+// Type-ahead for the watchlist boxes. The phone has no internet while it is on the setup Wi-Fi,
+// so this is a fixed list of popular Yahoo symbols; any other symbol can still be typed.
+static const char PORTAL_TICKER_SUGGESTIONS[] PROGMEM =
+  "<datalist id=\"ticker_suggestions\">"
+  "<option value=\"BTC-USD\">Bitcoin</option><option value=\"ETH-USD\">Ether</option>"
+  "<option value=\"SOL-USD\">Solana</option><option value=\"XRP-USD\">XRP</option>"
+  "<option value=\"DOGE-USD\">Dogecoin</option><option value=\"MSTR\">Strategy</option>"
+  "<option value=\"COIN\">Coinbase</option><option value=\"MARA\">MARA Holdings</option>"
+  "<option value=\"RIOT\">Riot Platforms</option><option value=\"IBIT\">iShares Bitcoin Trust</option>"
+  "<option value=\"AAPL\">Apple</option><option value=\"NVDA\">Nvidia</option>"
+  "<option value=\"TSLA\">Tesla</option><option value=\"MSFT\">Microsoft</option>"
+  "<option value=\"AMZN\">Amazon</option><option value=\"GOOGL\">Alphabet (Google)</option>"
+  "<option value=\"META\">Meta</option><option value=\"SPY\">S&amp;P 500 ETF</option>"
+  "<option value=\"QQQ\">Nasdaq 100 ETF</option><option value=\"^GSPC\">S&amp;P 500 index</option>"
+  "<option value=\"^IXIC\">Nasdaq Composite</option><option value=\"^DJI\">Dow Jones</option>"
+  "<option value=\"^RUT\">Russell 2000</option><option value=\"^VIX\">VIX volatility</option>"
+  "<option value=\"^TNX\">10-year Treasury yield</option><option value=\"GC=F\">Gold</option>"
+  "<option value=\"SI=F\">Silver</option><option value=\"CL=F\">Crude oil</option>"
+  "<option value=\"DX-Y.NYB\">US dollar index</option><option value=\"EURUSD=X\">Euro / US dollar</option>"
+  "<option value=\"GBPUSD=X\">Pound / US dollar</option><option value=\"JPY=X\">US dollar / yen</option>"
+  "</datalist>";
+
 static String portalPage() {
   String html;
   const RefreshIntervalUnit refreshUnit = preferredRefreshIntervalUnit(deviceConfig.refreshIntervalMinutes);
   const uint16_t refreshValue = refreshIntervalDisplayValue(deviceConfig.refreshIntervalMinutes, refreshUnit);
-  html.reserve(20000);
+  html.reserve(28000);
   html += F("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
   html += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
   html += F("<title>BLOCK CLOCK</title>");
@@ -89,6 +111,8 @@ static String portalPage() {
   html += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;}");
   html += F(".dual{display:grid;grid-template-columns:minmax(92px,1fr) 112px;gap:10px;align-items:start;}");
   html += F(".stack{display:grid;gap:14px;}");
+  html += F(".tickers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}.tickers input{text-transform:uppercase;}");
+  html += F("@media(max-width:480px){.tickers{grid-template-columns:repeat(2,minmax(0,1fr));}}");
   html += F(".inline{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;}.inline select{flex:1;min-width:160px;}");
   html += F("label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:#3a342d;}");
   html += F("input,select{width:100%;box-sizing:border-box;min-height:44px;height:44px;padding:10px 12px;border:1px solid #cfc6b7;border-radius:12px;font-size:16px;line-height:1.2;background:#fdfbf6;color:#171717;}");
@@ -102,6 +126,7 @@ static String portalPage() {
   html += F(".save-overlay{position:fixed;inset:0;background:rgba(253,251,246,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:9999;}");
   html += F(".save-overlay-spinner{width:36px;height:36px;border:3.5px solid rgba(247,147,26,.25);border-top-color:#f7931a;border-radius:50%;animation:fc-spin .9s linear infinite;}");
   html += F(".save-overlay-text{font-size:17px;font-weight:700;color:#2b1700;text-align:center;line-height:1.6;}");
+  html += F(".overlay-buttons{display:flex;gap:12px;}");
   html += F("button{border:none;border-radius:999px;padding:13px 18px;font-size:16px;font-weight:700;cursor:pointer;background:#f7931a;color:#2b1700;touch-action:manipulation;}");
   html += F("button.secondary{background:#ded4c2;color:#211d19;}");
   html += F("button[disabled],input[disabled]{opacity:.45;cursor:not-allowed;}");
@@ -112,7 +137,7 @@ static String portalPage() {
   // Must be a real input with autofocus so it absorbs the browser's initial focus
   // (a div with tabindex=-1 cannot receive input focus on mobile browsers).
   html += F("<input id=\"focus_guard\" tabindex=\"-1\" aria-hidden=\"true\" type=\"text\" readonly autofocus autocomplete=\"off\" style=\"position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;outline:none;border:none;background:transparent;font-size:16px;\">");
-  html += F("<div id=\"save_overlay\" class=\"save-overlay hidden\"><div id=\"save_overlay_spinner\" class=\"save-overlay-spinner\"></div><div id=\"save_overlay_text\" class=\"save-overlay-text\">Saving settings...</div><button id=\"save_overlay_action\" class=\"secondary hidden\" type=\"button\">Continue</button></div>");
+  html += F("<div id=\"save_overlay\" class=\"save-overlay hidden\"><div id=\"save_overlay_spinner\" class=\"save-overlay-spinner\"></div><div id=\"save_overlay_text\" class=\"save-overlay-text\">Saving settings...</div><div class=\"overlay-buttons\"><button id=\"save_overlay_action\" class=\"secondary hidden\" type=\"button\">Continue</button><button id=\"save_overlay_confirm\" class=\"hidden\" type=\"button\">Save anyway</button></div></div>");
   html += F("<div class=\"wrap\">");
   html += F("<section class=\"hero\">");
   appendPortalBrandHeader(html);
@@ -210,7 +235,7 @@ static String portalPage() {
   html += selectedAttr(!deviceConfig.quietHoursEnabled);
   html += F(">Off</option><option value=\"1\"");
   html += selectedAttr(deviceConfig.quietHoursEnabled);
-  html += F(">Pause refreshing</option></select><div class=\"hint\">No refreshes during these hours, so the screen stops flashing overnight. It keeps its last image, and a button press still refreshes.</div></div><div><label>From / until (local time)</label><div class=\"dual\">");
+  html += F(">Pause refreshing</option></select><div class=\"hint\">No refreshes during these hours, so the screen stops flashing overnight. It keeps its last image, and a button press still refreshes.</div></div><div id=\"quiet_times\"><label>From / until (local time)</label><div class=\"dual\">");
   for (uint8_t which = 0; which < 2; which++) {
     const uint8_t selectedHour = which == 0 ? deviceConfig.quietStartHour : deviceConfig.quietEndHour;
     html += which == 0 ? F("<select name=\"quiet_start\">") : F("<select name=\"quiet_end\">");
@@ -227,7 +252,40 @@ static String portalPage() {
     }
     html += F("</select>");
   }
-  html += F("</div></div></div></section>");
+  html += F("</div></div></div>");
+  const bool rotateInMinutes = deviceConfig.rotateSeconds >= 60 && (deviceConfig.rotateSeconds % 60) == 0;
+  html += F("<div class=\"grid\" style=\"margin-top:14px\"><div><label for=\"rotate_screens\">Rotate screens</label><select id=\"rotate_screens\" name=\"rotate_screens\"><option value=\"0\"");
+  html += selectedAttr(!deviceConfig.rotateScreens);
+  html += F(">Off, buttons only</option><option value=\"1\"");
+  html += selectedAttr(deviceConfig.rotateScreens);
+  html += F(">Automatically</option></select><div class=\"hint\">Flips to the next screen on its own, between data refreshes. Each flip redraws the e-ink, so short intervals use more battery. Pauses during quiet hours.</div></div>");
+  html += F("<div id=\"rotate_every\"><label for=\"rotate_value\">Every</label><div class=\"dual\"><input id=\"rotate_value\" name=\"rotate_value\" type=\"text\" inputmode=\"numeric\" value=\"");
+  html += String(rotateInMinutes ? deviceConfig.rotateSeconds / 60 : deviceConfig.rotateSeconds);
+  html += F("\"><select id=\"rotate_unit\" name=\"rotate_unit\"><option value=\"1\"");
+  html += selectedAttr(!rotateInMinutes);
+  html += F(">Seconds</option><option value=\"60\"");
+  html += selectedAttr(rotateInMinutes);
+  html += F(">Minutes</option></select></div><div class=\"hint\">From 15 seconds to 12 hours.</div></div></div></section>");
+
+  // ── Watchlist ─────────────────────────────────────────────────────────────
+  html += F("<section class=\"card\"><h2>Watchlist</h2><div class=\"stack\"><div><label for=\"watchlist\">Watchlist screen</label><select id=\"watchlist\" name=\"watchlist\"><option value=\"0\"");
+  html += selectedAttr(!deviceConfig.watchlistEnabled);
+  html += F(">Off</option><option value=\"1\"");
+  html += selectedAttr(deviceConfig.watchlistEnabled);
+  html += F(">Show my tickers</option></select><div class=\"hint\">Adds a fourth screen with the price and day change of up to six tickers.</div></div>");
+  html += F("<div id=\"ticker_fields\"><div class=\"tickers\">");
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    html += F("<input name=\"ticker");
+    html += String(i);
+    html += F("\" list=\"ticker_suggestions\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"Ticker ");
+    html += String(i + 1);
+    html += F("\" value=\"");
+    html += htmlEscape(deviceConfig.tickers[i]);
+    html += F("\">");
+  }
+  html += F("</div>");
+  html += FPSTR(PORTAL_TICKER_SUGGESTIONS);
+  html += F("<div class=\"hint\">Type for suggestions, or use any symbol from finance.yahoo.com.</div></div></div></section>");
 
   // ── MQTT ──────────────────────────────────────────────────────────────────
   html += F("<section id=\"mqtt_settings\" class=\"card\"><h2>MQTT</h2>");
@@ -267,17 +325,25 @@ static String portalPage() {
   // ── Data source visibility ─────────────────────────────────────────────────
   html += F("(function(){var source=document.getElementById('data_source');var mqtt=document.getElementById('mqtt_settings');function sync(){if(!source||!mqtt)return;mqtt.classList.toggle('hidden',source.value!=='mqtt');}if(source)source.addEventListener('change',sync);sync();})();");
 
+  // ── Rotate / watchlist visibility ─────────────────────────────────────────
+  html += F("(function(){function link(selectId,targetId){var sel=document.getElementById(selectId);var target=document.getElementById(targetId);function sync(){if(sel&&target)target.classList.toggle('hidden',sel.value!=='1');}if(sel)sel.addEventListener('change',sync);sync();}link('quiet_hours','quiet_times');link('rotate_screens','rotate_every');link('watchlist','ticker_fields');})();");
+
   // ── Save overlay ───────────────────────────────────────────────────────────
-  html += F("(function(){var form=document.getElementById('setup_form');var saveButton=document.getElementById('save_button');var overlay=document.getElementById('save_overlay');var overlayText=document.getElementById('save_overlay_text');var overlaySpinner=document.getElementById('save_overlay_spinner');var overlayAction=document.getElementById('save_overlay_action');var saveInFlight=false;");
+  html += F("(function(){var form=document.getElementById('setup_form');var saveButton=document.getElementById('save_button');var overlay=document.getElementById('save_overlay');var overlayText=document.getElementById('save_overlay_text');var overlaySpinner=document.getElementById('save_overlay_spinner');var overlayAction=document.getElementById('save_overlay_action');var overlayConfirm=document.getElementById('save_overlay_confirm');var saveInFlight=false;var pendingBody=null;");
+  html += F("var headers={'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'};");
   html += F("function escapeHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}");
   html += F("function setOverlayText(text){if(!overlayText)return;overlayText.innerHTML=escapeHtml(text).replace(/\\n/g,'<br>');}");
-  html += F("function showOverlay(text){document.body.style.overflow='hidden';if(overlay)overlay.classList.remove('hidden');if(overlaySpinner)overlaySpinner.classList.remove('hidden');if(overlayAction)overlayAction.classList.add('hidden');setOverlayText(text);}");
+  html += F("function showOverlay(text){document.body.style.overflow='hidden';if(overlay)overlay.classList.remove('hidden');if(overlaySpinner)overlaySpinner.classList.remove('hidden');if(overlayAction)overlayAction.classList.add('hidden');if(overlayConfirm)overlayConfirm.classList.add('hidden');setOverlayText(text);}");
   html += F("function showOverlayHtml(html){document.body.style.overflow='hidden';if(overlay)overlay.classList.remove('hidden');if(overlayText)overlayText.innerHTML=html;}");
-  html += F("function hideOverlay(){document.body.style.overflow='';if(overlay)overlay.classList.add('hidden');if(overlayAction)overlayAction.classList.add('hidden');if(overlaySpinner)overlaySpinner.classList.remove('hidden');}");
-  html += F("function failOverlay(text){if(overlaySpinner)overlaySpinner.classList.add('hidden');setOverlayText(text);if(overlayAction){overlayAction.textContent='Continue';overlayAction.classList.remove('hidden');}if(saveButton)saveButton.disabled=false;saveInFlight=false;}");
+  html += F("function hideOverlay(){document.body.style.overflow='';if(overlay)overlay.classList.add('hidden');if(overlayAction)overlayAction.classList.add('hidden');if(overlayConfirm)overlayConfirm.classList.add('hidden');if(overlaySpinner)overlaySpinner.classList.remove('hidden');}");
+  html += F("function failOverlay(text){if(overlaySpinner)overlaySpinner.classList.add('hidden');setOverlayText(text);if(overlayAction){overlayAction.textContent='Continue';overlayAction.classList.remove('hidden');}if(overlayConfirm)overlayConfirm.classList.add('hidden');if(saveButton)saveButton.disabled=false;saveInFlight=false;}");
+  html += F("function askOverlay(text){failOverlay(text);if(overlayAction)overlayAction.textContent='Go back';if(overlayConfirm)overlayConfirm.classList.remove('hidden');}");
+  html += F("function save(body,checks){showOverlay('Saving settings...');return fetch('/save',{method:'POST',headers:headers,body:body,cache:'no-store'}).then(function(r){return r.json();}).then(function(saved){if(!saved||!saved.ok){failOverlay((saved&&saved.error)||'Save failed.');return;}showOverlayHtml('Settings saved!'+(checks?'<br><span style=\\'font-weight:400;font-size:15px\\'>'+escapeHtml(checks).replace(/\\n/g,'<br>')+'</span>':'')+'<br>Device is restarting...');});}");
+  html += F("function lostConnection(){failOverlay('Settings check failed.\\nReconnect to BLOCK CLOCK setup Wi-Fi and try again.');}");
   html += F("if(overlayAction)overlayAction.addEventListener('click',hideOverlay);");
+  html += F("if(overlayConfirm)overlayConfirm.addEventListener('click',function(){if(!pendingBody)return;saveInFlight=true;if(saveButton)saveButton.disabled=true;save(pendingBody).catch(lostConnection);});");
   html += F("if(!form)return;");
-  html += F("form.addEventListener('submit',function(event){if(saveInFlight)return;if(!window.fetch)return;event.preventDefault();saveInFlight=true;if(saveButton)saveButton.disabled=true;showOverlay('Checking settings...');var body=new URLSearchParams(new FormData(form)).toString();var headers={'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'};fetch('/validate',{method:'POST',headers:headers,body:body,cache:'no-store'}).then(function(r){return r.json();}).then(function(data){if(!data||!data.ok){failOverlay((data&&data.message)||'Settings check failed.');return null;}showOverlay('Saving settings...');return fetch('/save',{method:'POST',headers:headers,body:body,cache:'no-store'}).then(function(r){return r.json();}).then(function(saved){if(!saved||!saved.ok){failOverlay((saved&&saved.error)||'Save failed.');return;}showOverlayHtml('Settings saved!<br>Device is restarting...');});}).catch(function(){failOverlay('Settings check failed.\\nReconnect to BLOCK CLOCK setup Wi-Fi and try again.');});});})();");
+  html += F("form.addEventListener('submit',function(event){if(saveInFlight)return;if(!window.fetch)return;event.preventDefault();saveInFlight=true;if(saveButton)saveButton.disabled=true;showOverlay('Checking settings...\\nThis can take up to a minute with two networks.');var body=new URLSearchParams(new FormData(form)).toString();pendingBody=body;fetch('/validate',{method:'POST',headers:headers,body:body,cache:'no-store'}).then(function(r){return r.json();}).then(function(data){if(!data||!data.ok){failOverlay((data&&data.message)||'Settings check failed.');return null;}if(data.warn){askOverlay(data.message||'');return null;}return save(body,data.message);}).catch(lostConnection);});})();");
 
   // ── Password show/hide ─────────────────────────────────────────────────────
   html += F("(function(){");
@@ -325,9 +391,10 @@ static void handlePortalRoot() {
   portalServer.send(200, "text/html", portalPage());
 }
 
-static void portalSendJson(bool ok, const char* message) {
+static void portalSendJson(bool ok, const char* message, bool warn = false) {
   String json = F("{\"ok\":");
   json += ok ? F("true") : F("false");
+  if (warn) json += F(",\"warn\":true");
   json += F(",\"message\":\"");
   json += jsonEscape(message ? message : "");
   json += F("\"}");
@@ -355,6 +422,13 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
   cfg.quietHoursEnabled = portalServer.arg("quiet_hours") == "1";
   cfg.quietStartHour = (uint8_t)clampInt(portalServer.arg("quiet_start").toInt(), 0, 23);
   cfg.quietEndHour = (uint8_t)clampInt(portalServer.arg("quiet_end").toInt(), 0, 23);
+  cfg.rotateScreens = portalServer.arg("rotate_screens") == "1";
+  const long rotateUnit = portalServer.arg("rotate_unit") == "60" ? 60 : 1;
+  cfg.rotateSeconds = (uint16_t)clampInt((int)(clampInt(portalServer.arg("rotate_value").toInt(), 0, MAX_ROTATE_SECONDS) * rotateUnit), MIN_ROTATE_SECONDS, MAX_ROTATE_SECONDS);
+  cfg.watchlistEnabled = portalServer.arg("watchlist") == "1";
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    safeCopyString(cfg.tickers[i], sizeof(cfg.tickers[i]), portalServer.arg(String("ticker") + i));
+  }
   cfg.batteryDisplayMode = (uint8_t)clampInt(portalServer.arg("battery_mode").toInt(), BATTERY_DISPLAY_HIDDEN, BATTERY_DISPLAY_ICON_PERCENT);
   safeCopyString(cfg.mqttServer, sizeof(cfg.mqttServer), portalServer.arg("mqtt_server"));
   cfg.mqttPort = parsePort(portalServer.arg("mqtt_port"), DEFAULT_MQTT_PORT);
@@ -366,18 +440,28 @@ static void loadSubmittedPortalConfig(DeviceConfig& cfg) {
   safeCopyString(cfg.topicPriceValue, sizeof(cfg.topicPriceValue), portalServer.arg("topic_price"));
 }
 
-// A backup network that is in range gets a real connection test, so a mistyped password shows up now
-// rather than on the road. One that is out of range (or hidden) cannot be tested and is accepted as typed.
-static bool backupWifiLooksWrong(const DeviceConfig& cfg) {
-  if (!hasText(cfg.wifiSsid2)) return false;
+// Which of the two networks the scan can see. A network that is in range but will not connect almost
+// always has a mistyped password; one that is out of range (or hidden) cannot be tested right now.
+static void scanForNetworks(const DeviceConfig& cfg, bool& primaryInRange, bool& backupInRange) {
+  primaryInRange = backupInRange = false;
   WiFi.mode(WIFI_AP_STA);
   const int found = WiFi.scanNetworks();
-  bool inRange = false;
-  for (int i = 0; i < found && !inRange; i++) inRange = WiFi.SSID(i) == cfg.wifiSsid2;
+  for (int i = 0; i < found; i++) {
+    const String ssid = WiFi.SSID(i);
+    if (ssid == cfg.wifiSsid) primaryInRange = true;
+    if (hasText(cfg.wifiSsid2) && ssid == cfg.wifiSsid2) backupInRange = true;
+  }
   WiFi.scanDelete();
-  return inRange && !connectToNetwork(cfg.wifiSsid2, cfg.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
 }
 
+static void portalSendWifiResult(const String& status, const String& warning) {
+  if (warning.length()) portalSendJson(true, (warning + F("\n\nSave anyway?")).c_str(), true);
+  else portalSendJson(true, status.c_str());
+}
+
+// Settings save as long as one of the two networks connects, so the clock can be set up away from
+// home on the backup alone. A network that is in range but refuses to connect is usually a wrong
+// password, so the page asks before saving rather than letting the owner find out on the road.
 static void handlePortalValidate() {
   DeviceConfig submitted = deviceConfig;
   loadSubmittedPortalConfig(submitted);
@@ -389,37 +473,92 @@ static void handlePortalValidate() {
     return;
   }
 
-  if (backupWifiLooksWrong(submitted)) {
-    portalSendJson(false, "Backup Wi-Fi: failed\nThe backup network is in range but would not connect. Check its password, or clear it.");
+  // Cheap checks first, so a typo never waits behind a minute of Wi-Fi tests.
+  if (submitted.quietHoursEnabled && submitted.quietStartHour == submitted.quietEndHour) {
+    portalSendJson(false, "Quiet hours: check the times\nPick different start and end hours, or turn quiet hours off.");
+    return;
+  }
+  if (submitted.rotateScreens) {
+    const long typed = portalServer.arg("rotate_value").toInt();
+    const long seconds = typed * (portalServer.arg("rotate_unit") == "60" ? 60L : 1L);
+    if (typed <= 0 || seconds < MIN_ROTATE_SECONDS || seconds > MAX_ROTATE_SECONDS) {
+      portalSendJson(false, "Rotate screens: check the interval\nPick anything from 15 seconds to 12 hours (720 minutes).");
+      return;
+    }
+  }
+  if (submitted.watchlistEnabled && tickerCount(submitted) == 0) {
+    portalSendJson(false, "Watchlist: no tickers\nAdd at least one ticker, such as MSTR or ETH-USD, or turn the watchlist off.");
     return;
   }
 
-  // Validate the main network on its own; the backup may legitimately be out of range right now.
-  DeviceConfig primaryOnly = submitted;
-  primaryOnly.wifiSsid2[0] = '\0';
-  if (!connectWiFi(primaryOnly, WIFI_CONNECT_TIMEOUT_MS, true)) {
-    portalSendJson(false, "Wi-Fi: failed\nCheck the SSID and password, then try again.");
+  const bool hasBackup = hasText(submitted.wifiSsid2);
+  bool primaryInRange = false;
+  bool backupInRange = false;
+  scanForNetworks(submitted, primaryInRange, backupInRange);
+
+  // Try the backup first when it is the one in range, so the connection left up for the MQTT
+  // and watchlist checks below is a working one.
+  const bool backupFirst = hasBackup && backupInRange && !primaryInRange;
+  bool primaryOk = false;
+  bool backupOk = false;
+  if (backupFirst) {
+    backupOk = connectToNetwork(submitted.wifiSsid2, submitted.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
+    if (!backupOk) primaryOk = connectToNetwork(submitted.wifiSsid, submitted.wifiPass, WIFI_CONNECT_TIMEOUT_MS, true);
+  } else {
+    if (hasBackup && backupInRange) backupOk = connectToNetwork(submitted.wifiSsid2, submitted.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
+    primaryOk = connectToNetwork(submitted.wifiSsid, submitted.wifiPass, WIFI_CONNECT_TIMEOUT_MS, true);
+    // The backup may also be a hidden network that never shows in a scan.
+    if (!primaryOk && hasBackup && !backupInRange) backupOk = connectToNetwork(submitted.wifiSsid2, submitted.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
+    // The failed main attempt dropped the backup connection; rejoin it for the checks below.
+    if (!primaryOk && backupOk && WiFi.status() != WL_CONNECTED) {
+      backupOk = connectToNetwork(submitted.wifiSsid2, submitted.wifiPass2, WIFI_CONNECT_TIMEOUT_MS, true);
+    }
+  }
+
+  if (!primaryOk && !backupOk) {
+    portalSendJson(false, hasBackup
+      ? "Wi-Fi: failed\nNeither network would connect. Check the names and passwords, then try again."
+      : "Wi-Fi: failed\nCheck the SSID and password, then try again.");
     return;
+  }
+  // One network works, so saving is allowed; a second one that is in range but refused is worth a
+  // look first, though, so the page asks before saving (weak signal can cause it too).
+  String warning;
+  if (!primaryOk && primaryInRange) warning = F("Main Wi-Fi: failed\nThe main network is in range but would not connect. Check its password.");
+  if (hasBackup && !backupOk && backupInRange) warning = F("Backup Wi-Fi: failed\nThe backup network is in range but would not connect. Check its password.");
+
+  String wifiStatus = primaryOk ? F("Wi-Fi: OK")
+    : primaryInRange ? F("Backup Wi-Fi: OK")
+    : F("Backup Wi-Fi: OK\nMain Wi-Fi is out of range, so it is saved untested.");
+
+  if (submitted.watchlistEnabled && tickerCount(submitted) > 0) {
+    BlockData scratch = {};
+    String unknown;
+    if (fetchTickerQuotes(submitted, scratch, &unknown) && unknown.length()) {
+      String message = wifiStatus + F("\nWatchlist: not found\nYahoo Finance does not know ") + unknown + F(". Check the spelling, e.g. ETH-USD for Ether.");
+      portalSendJson(false, message.c_str());
+      return;
+    }
   }
 
   if (sanitizeDataSourceMode(submitted.dataSourceMode) != DATA_SOURCE_MQTT) {
-    portalSendJson(true, "Wi-Fi: OK");
+    portalSendWifiResult(wifiStatus, warning);
     return;
   }
 
   if (!hasText(submitted.mqttServer) || submitted.mqttPort == 0) {
-    portalSendJson(false, "Wi-Fi: OK\nMQTT: missing\nEnter the broker host and port.");
+    portalSendJson(false, (wifiStatus + F("\nMQTT: missing\nEnter the broker host and port.")).c_str());
     return;
   }
 
   if (!connectMQTT(submitted, MQTT_CONNECT_TIMEOUT_MS)) {
     if (mqttClient.connected()) mqttClient.disconnect();
-    portalSendJson(false, "Wi-Fi: OK\nMQTT: failed\nCheck the broker host, port, and credentials.");
+    portalSendJson(false, (wifiStatus + F("\nMQTT: failed\nCheck the broker host, port, and credentials.")).c_str());
     return;
   }
 
   if (mqttClient.connected()) mqttClient.disconnect();
-  portalSendJson(true, "Wi-Fi: OK\nMQTT: OK");
+  portalSendWifiResult(wifiStatus + F("\nMQTT: OK"), warning);
 }
 
 static void handlePortalSave() {

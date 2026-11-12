@@ -10,6 +10,10 @@
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
 #include "nvs_flash.h"
+#include "soc/soc_caps.h"
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+#include "driver/usb_serial_jtag.h"
+#endif
 #include "qrcode.h"
 #include <cctype>
 #include <cmath>
@@ -89,6 +93,8 @@ RTC_DATA_ATTR uint8_t rtcScreenIndex = 0;
 RTC_DATA_ATTR int rtcBatteryPercent = -1;
 RTC_DATA_ATTR float rtcBatteryVoltage = 0.0f;
 RTC_DATA_ATTR time_t rtcLastKnownUnixTime = 0;
+RTC_DATA_ATTR time_t rtcNextRefreshAt = 0;        // when the next data refresh is planned, 0 when unknown
+RTC_DATA_ATTR time_t rtcLastScreenChangeAt = 0;   // when the shown screen last changed, for auto-rotate
 RTC_DATA_ATTR bool batteryGaugeStateValid = false;
 RTC_DATA_ATTR int batteryGaugePercent = 0;
 RTC_DATA_ATTR float batteryGaugeReferenceVoltage = 0.0f;
@@ -110,6 +116,20 @@ char portalApPassword[AP_PASSWORD_SIZE] = "";
 bool portalShouldRestart = false;
 bool portalFactoryResetRequested = false;
 
+// While a computer is attached over USB the clock never deep-sleeps (see goToSleepForSeconds); it
+// waits awake in loop() and then runs the next wake in-process. These say what that wake stands in for.
+enum SimulatedWake : uint8_t {
+  SIMULATED_WAKE_NONE = 0,
+  SIMULATED_WAKE_TIMER,
+  SIMULATED_WAKE_FUNCTION,
+  SIMULATED_WAKE_SETUP
+};
+static SimulatedWake simulatedWake = SIMULATED_WAKE_NONE;
+static bool usbWaitActive = false;
+static bool usbWaitHasTimer = false;
+static uint32_t usbWaitStartedMs = 0;
+static uint32_t usbWaitSeconds = 0;
+
 enum SetupBootAction : uint8_t {
   SETUP_BOOT_ACTION_NONE = 0,
   SETUP_BOOT_ACTION_PORTAL = 1,
@@ -129,14 +149,32 @@ static bool setupButtonPressed() {
   return digitalRead(PIN_SETUP_BUTTON) == LOW;
 }
 
+static esp_sleep_wakeup_cause_t wakeCause() {
+  switch (simulatedWake) {
+    case SIMULATED_WAKE_TIMER: return ESP_SLEEP_WAKEUP_TIMER;
+    case SIMULATED_WAKE_FUNCTION:
+    case SIMULATED_WAKE_SETUP: return ESP_SLEEP_WAKEUP_EXT1;
+    default: return esp_sleep_get_wakeup_cause();
+  }
+}
+
+static uint64_t wakeButtonMask() {
+  switch (simulatedWake) {
+    case SIMULATED_WAKE_FUNCTION: return FUNCTION_BUTTON_WAKE_MASK;
+    case SIMULATED_WAKE_SETUP: return SETUP_BUTTON_WAKE_MASK;
+    case SIMULATED_WAKE_TIMER: return 0;
+    default: return esp_sleep_get_ext1_wakeup_status();
+  }
+}
+
 static bool wasSetupButtonWake() {
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) return false;
-  return (esp_sleep_get_ext1_wakeup_status() & SETUP_BUTTON_WAKE_MASK) != 0;
+  if (wakeCause() != ESP_SLEEP_WAKEUP_EXT1) return false;
+  return (wakeButtonMask() & SETUP_BUTTON_WAKE_MASK) != 0;
 }
 
 static bool wasFunctionButtonWake() {
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) return false;
-  return (esp_sleep_get_ext1_wakeup_status() & FUNCTION_BUTTON_WAKE_MASK) != 0;
+  if (wakeCause() != ESP_SLEEP_WAKEUP_EXT1) return false;
+  return (wakeButtonMask() & FUNCTION_BUTTON_WAKE_MASK) != 0;
 }
 
 static bool setupWakeRequested() {
@@ -183,7 +221,32 @@ static void disconnectNetwork() {
   WiFi.mode(WIFI_OFF);
 }
 
-static void goToSleepForSeconds(uint32_t seconds) {
+// True while a computer (not just a charger) is talking to the USB port: it sends start-of-frame
+// packets that a power bank or wall adapter never does.
+static bool usbHostConnected() {
+#if SOC_USB_SERIAL_JTAG_SUPPORTED && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE == 1
+  return usb_serial_jtag_is_connected();
+#else
+  return false;
+#endif
+}
+
+// Deep sleep powers the USB port down, so a computer loses the board, and an upload started
+// while it sleeps (or that it falls asleep during) fails. With a computer attached, stay awake
+// instead: loop() waits out the time, or a button press, and runs the next wake without a reset,
+// so the port is always there for flashing. A charger alone still lets it deep-sleep.
+static bool beginUsbAwakeWait(bool hasTimer, uint32_t seconds) {
+  if (!usbHostConnected()) return false;
+  Serial.printf("[BlockClock] USB host attached: staying awake instead of deep sleep (%s %lus)\n",
+                hasTimer ? "next wake in" : "waiting for a button,", (unsigned long)seconds);
+  usbWaitActive = true;
+  usbWaitHasTimer = hasTimer;
+  usbWaitSeconds = seconds;
+  usbWaitStartedMs = millis();
+  return true;
+}
+
+static void deepSleep(bool hasTimer, uint32_t seconds) {
   digitalWrite(PIN_EINK_POWER, LOW);
 
   rtc_gpio_pullup_en((gpio_num_t)PIN_FUNCTION_BUTTON);
@@ -192,9 +255,14 @@ static void goToSleepForSeconds(uint32_t seconds) {
   rtc_gpio_pulldown_dis((gpio_num_t)PIN_SETUP_BUTTON);
   esp_sleep_enable_ext1_wakeup_io(BUTTON_WAKE_MASK, ESP_EXT1_WAKEUP_ANY_LOW);
 
-  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
+  if (hasTimer) esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
   Serial.flush();
   esp_deep_sleep_start();
+}
+
+static void goToSleepForSeconds(uint32_t seconds) {
+  if (beginUsbAwakeWait(true, seconds)) return;
+  deepSleep(true, seconds);
 }
 
 // Unix time of a wake `seconds` from now, or 0 while the clock has no valid time.
@@ -203,8 +271,12 @@ static time_t wakeTimeAfter(uint32_t seconds) {
   return now >= 1700000000 ? now + (time_t)seconds : 0;
 }
 
-// Time left in the current refresh interval, so flipping screens never postpones the next refresh.
+// Time left until the planned refresh, so flipping screens never postpones it.
 static uint32_t secondsUntilNextRefresh() {
+  const time_t nowTime = time(nullptr);
+  if (nowTime >= 1700000000 && rtcNextRefreshAt >= 1700000000) {
+    return rtcNextRefreshAt > nowTime + 5 ? (uint32_t)(rtcNextRefreshAt - nowTime) : 5;
+  }
   const uint32_t interval = (uint32_t)deviceConfig.refreshIntervalMinutes * 60UL;
   const time_t now = time(nullptr);
   if (now < 1700000000 || rtcLastKnownUnixTime < 1700000000 || now < rtcLastKnownUnixTime) return skipQuietHours(deviceConfig, interval);
@@ -221,30 +293,62 @@ static bool functionButtonHeld(uint32_t holdMs) {
   return false;
 }
 
-// Short FUNCTION press: next dashboard screen from the cached data, no network.
+static void advanceScreen() {
+  rtcScreenIndex = (rtcScreenIndex + 1) % dashboardScreenCount(deviceConfig);
+  rtcLastScreenChangeAt = time(nullptr);
+}
+
+// Auto-rotate: is it time to flip to the next screen?
+static bool rotationDue() {
+  if (!deviceConfig.rotateScreens) return false;
+  const time_t nowTime = time(nullptr);
+  if (nowTime < 1700000000) return false;
+  if (rtcLastScreenChangeAt < 1700000000 || rtcLastScreenChangeAt > nowTime) return true;
+  return (uint32_t)(nowTime - rtcLastScreenChangeAt) + 3 >= deviceConfig.rotateSeconds;
+}
+
+// How long to sleep given the next refresh is `refreshSeconds` away: with auto-rotate on, wake
+// sooner for the next flip, unless that flip would land in quiet hours or right before the refresh.
+static uint32_t sleepSecondsWithRotation(uint32_t refreshSeconds) {
+  // Without cached data a flip wake could only retry the network, so wait for the refresh.
+  if (!deviceConfig.rotateScreens || !rtcHasBlockData) return refreshSeconds;
+  const time_t nowTime = time(nullptr);
+  if (nowTime < 1700000000) return refreshSeconds;
+  uint32_t untilFlip = deviceConfig.rotateSeconds;
+  if (rtcLastScreenChangeAt >= 1700000000 && rtcLastScreenChangeAt <= nowTime) {
+    const uint32_t sinceFlip = (uint32_t)(nowTime - rtcLastScreenChangeAt);
+    untilFlip = sinceFlip >= deviceConfig.rotateSeconds ? 5 : deviceConfig.rotateSeconds - sinceFlip;
+  }
+  if (untilFlip + ROTATE_REFRESH_LEAD_SECONDS >= refreshSeconds) return refreshSeconds;
+  if (skipQuietHours(deviceConfig, untilFlip) != untilFlip) return refreshSeconds;
+  return untilFlip;
+}
+
+// A timer wake that only exists to flip screens: the refresh is still a while off.
+static bool isRotationOnlyWake() {
+  if (!deviceConfig.rotateScreens || !rtcHasBlockData) return false;
+  const time_t nowTime = time(nullptr);
+  return nowTime >= 1700000000 && rtcNextRefreshAt >= 1700000000
+    && rtcNextRefreshAt > nowTime + ROTATE_REFRESH_LEAD_SECONDS;
+}
+
+// Next dashboard screen from the cached data, no network: a quick button tap, or an auto-rotate wake.
 static void showNextScreenAndSleep(float batteryVoltage, int batteryPercent) {
-  rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+  advanceScreen();
   BlockData data = rtcBlockData;
   data.batteryVoltage = batteryVoltage;
   data.batteryPercent = batteryPercent;
-  const uint32_t sleepSeconds = secondsUntilNextRefresh();
-  data.nextRefreshAt = wakeTimeAfter(sleepSeconds);
+  const uint32_t refreshSeconds = secondsUntilNextRefresh();
+  data.nextRefreshAt = wakeTimeAfter(refreshSeconds);
   clearScreenRenderWindow();
   drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
-  goToSleepForSeconds(sleepSeconds);
+  rtcLastScreenChangeAt = time(nullptr);  // the next auto-flip counts from when this screen appeared
+  goToSleepForSeconds(sleepSecondsWithRotation(refreshSeconds));
 }
 
 static void goToWelcomeSleep() {
-  digitalWrite(PIN_EINK_POWER, LOW);
-
-  rtc_gpio_pullup_en((gpio_num_t)PIN_FUNCTION_BUTTON);
-  rtc_gpio_pulldown_dis((gpio_num_t)PIN_FUNCTION_BUTTON);
-  rtc_gpio_pullup_en((gpio_num_t)PIN_SETUP_BUTTON);
-  rtc_gpio_pulldown_dis((gpio_num_t)PIN_SETUP_BUTTON);
-  esp_sleep_enable_ext1_wakeup_io(BUTTON_WAKE_MASK, ESP_EXT1_WAKEUP_ANY_LOW);
-
-  Serial.flush();
-  esp_deep_sleep_start();
+  if (beginUsbAwakeWait(false, 0)) return;
+  deepSleep(false, 0);
 }
 
 static void resetRuntimeState() {
@@ -254,6 +358,8 @@ static void resetRuntimeState() {
   rtcBatteryPercent = -1;
   rtcBatteryVoltage = 0.0f;
   rtcLastKnownUnixTime = 0;
+  rtcNextRefreshAt = 0;
+  rtcLastScreenChangeAt = 0;
   batteryGaugeStateValid = false;
   batteryGaugePercent = 0;
   batteryGaugeReferenceVoltage = 0.0f;
@@ -279,14 +385,8 @@ static void factoryResetAndShowWelcome() {
   goToWelcomeSleep();
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(30);
-  Serial.println();
-  Serial.println("==== Block Clock boot ====");
-
-  prepareHardware();
-  buildPortalCredentials();
+// One wake: from deep sleep (or power-on) via setup(), or in-process from loop() while USB keeps it awake.
+static void runWake() {
   const SetupBootAction bootAction = detectSetupBootAction();
   if (bootAction == SETUP_BOOT_ACTION_FACTORY_RESET) {
     factoryResetAndShowWelcome();
@@ -311,7 +411,8 @@ void setup() {
     return;
   }
 
-  const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+  const esp_sleep_wakeup_cause_t cause = wakeCause();
+  const uint8_t screenBeforeWake = rtcScreenIndex;
   const esp_reset_reason_t resetReason = esp_reset_reason();
   const bool functionWake = wasFunctionButtonWake();
   const bool manualWake = functionWake || bootAction == SETUP_BOOT_ACTION_CYCLE;
@@ -320,15 +421,16 @@ void setup() {
   // looking at the screen waiting for data" event. Without this case, HW-reset
   // boots fall through to the no-placeholder path and the user stares at the
   // previous image (or a blank screen on cold boot) for ~6-10 s.
-  const bool homeButtonReset = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED
+  const bool homeButtonReset = cause == ESP_SLEEP_WAKEUP_UNDEFINED
     && deviceConfig.configured
     && bootAction == SETUP_BOOT_ACTION_NONE
     && resetReason != ESP_RST_SW;
   Serial.printf(
-    "[BlockClock] wake cause=%d reset=%d ext1=0x%llX manualWake=%d homeReset=%d hasCache=%d postSave=%d\n",
-    (int)wakeCause,
+    "[BlockClock] wake cause=%d simulated=%d reset=%d ext1=0x%llX manualWake=%d homeReset=%d hasCache=%d postSave=%d\n",
+    (int)cause,
+    (int)simulatedWake,
     (int)resetReason,
-    (unsigned long long)esp_sleep_get_ext1_wakeup_status(),
+    (unsigned long long)wakeButtonMask(),
     (int)manualWake,
     (int)homeButtonReset,
     (int)rtcHasBlockData,
@@ -344,15 +446,27 @@ void setup() {
   // During quiet hours a tap means someone is looking, so it fetches live data instead of flipping from a stale cache.
   const bool quietTap = manualWake && nowIsQuiet(deviceConfig);
   if (quietTap && !functionWake) {
-    rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+    advanceScreen();
   } else if (quietTap) {
-    if (!functionButtonHeld(FUNCTION_LONG_PRESS_MS)) rtcScreenIndex = (rtcScreenIndex + 1) % DASHBOARD_SCREEN_COUNT;
+    if (!functionButtonHeld(FUNCTION_LONG_PRESS_MS)) advanceScreen();
   } else if (manualWake && rtcHasBlockData && !(functionWake && functionButtonHeld(FUNCTION_LONG_PRESS_MS))) {
     showNextScreenAndSleep(batteryVoltage, batteryPercent);
     return;
   }
-  // A refresh keeps whichever screen was last picked; only a button tap changes it.
-  if (rtcScreenIndex >= DASHBOARD_SCREEN_COUNT) rtcScreenIndex = 0;
+
+  // Auto-rotate: a timer wake well before the next refresh only flips the screen, from cache.
+  const bool timerWake = cause == ESP_SLEEP_WAKEUP_TIMER;
+  if (timerWake && isRotationOnlyWake()) {
+    if (rotationDue()) {
+      showNextScreenAndSleep(batteryVoltage, batteryPercent);
+    } else {
+      goToSleepForSeconds(sleepSecondsWithRotation(secondsUntilNextRefresh()));
+    }
+    return;
+  }
+  // A refresh keeps whichever screen was last picked, unless auto-rotate says it is time to move on.
+  if (timerWake && rotationDue()) advanceScreen();
+  if (rtcScreenIndex >= dashboardScreenCount(deviceConfig)) rtcScreenIndex = 0;
 
   // Freedom Clock pattern: when this boot is a known "user is waiting for data"
   // case — button wake with cache, or the very first boot after a portal save —
@@ -375,9 +489,12 @@ void setup() {
     safeCopyCString(pending.blocksToHalving, sizeof(pending.blocksToHalving), LOADING_TEXT);
     safeCopyCString(pending.hashrateEhs, sizeof(pending.hashrateEhs), LOADING_TEXT);
     safeCopyCString(pending.priceValue, sizeof(pending.priceValue), LOADING_TEXT);
+    for (int i = 0; i < MAX_TICKERS; i++) pending.tickerQuotes[i].price = 0.0;  // watchlist shows "--" while loading
+    pending.tickersUpdatedAt = 0;
     pending.wifiOk = true;
     pending.dataOk = false;
     pending.updatedAt = 0;
+    pending.networkUpdatedAt = 0;
     pending.nextRefreshAt = 0;
     clearScreenRenderWindow();
     drawBlockDashboard(pending, deviceConfig, rtcScreenIndex);
@@ -393,7 +510,6 @@ void setup() {
   data.batteryPercent = batteryPercent;
   data.wifiOk = true;
   data.dataOk = false;
-  data.updatedAt = rtcLastKnownUnixTime;
 
   bool wifiOk = connectWiFi(deviceConfig, WIFI_CONNECT_TIMEOUT_MS, false, &rtcWifiPreferSecondary);
 
@@ -405,18 +521,17 @@ void setup() {
     } else {
       dataOk = fetchBlockDataOnline(deviceConfig, data);
     }
+    if (watchlistScreenShown(deviceConfig)) fetchTickerQuotes(deviceConfig, data);
   }
 
   data.batteryVoltage = batteryVoltage;
   data.batteryPercent = batteryPercent;
   data.wifiOk = wifiOk;
   data.dataOk = dataOk;
-  // updatedAt is when the shown price was fetched, so a failed fetch keeps the old time and the
-  // screen reads as stale; rtcLastKnownUnixTime tracks the wall clock either way.
+  // The fetchers stamp updatedAt, networkUpdatedAt and tickersUpdatedAt only for what actually came
+  // in, so anything that failed keeps its old time and its screen says how old it is.
   const time_t nowTime = time(nullptr);
   if (nowTime >= 1700000000) rtcLastKnownUnixTime = nowTime;
-  if (dataOk && nowTime >= 1700000000) data.updatedAt = nowTime;
-  else data.updatedAt = rtcHasBlockData ? rtcBlockData.updatedAt : 0;
 
   if (hasUsefulBlockData(data)) {
     rtcBlockData = data;
@@ -426,8 +541,9 @@ void setup() {
   // With no network reachable, look again sooner than a long refresh interval would.
   const uint16_t sleepMinutes = wifiOk ? deviceConfig.refreshIntervalMinutes
     : (uint16_t)min((int)deviceConfig.refreshIntervalMinutes, (int)WIFI_OFFLINE_RETRY_MINUTES);
-  const uint32_t sleepSeconds = skipQuietHours(deviceConfig, (uint32_t)sleepMinutes * 60UL);
-  data.nextRefreshAt = wakeTimeAfter(sleepSeconds);
+  const uint32_t refreshSeconds = skipQuietHours(deviceConfig, (uint32_t)sleepMinutes * 60UL);
+  data.nextRefreshAt = wakeTimeAfter(refreshSeconds);
+  rtcNextRefreshAt = data.nextRefreshAt;
 
   if (pendingFrameDrawn) {
     // Partial refresh: full-screen window (avoids partial-window edge artifacts),
@@ -443,10 +559,78 @@ void setup() {
     // sit during fetch and do one clean full refresh at the end.
     drawBlockDashboard(data, deviceConfig, rtcScreenIndex);
   }
+  // A screen picked at the start of this wake only appeared now, after the fetch (and NTP sync),
+  // so the next auto-flip counts from here.
+  if (rtcScreenIndex != screenBeforeWake) rtcLastScreenChangeAt = time(nullptr);
   disconnectNetwork();
-  goToSleepForSeconds(sleepSeconds);
+  goToSleepForSeconds(sleepSecondsWithRotation(refreshSeconds));
 }
 
+void setup() {
+  Serial.begin(115200);
+  delay(30);
+  Serial.println();
+  Serial.println("==== Block Clock boot ====");
+
+  prepareHardware();
+  buildPortalCredentials();
+  runWake();
+}
+
+// Only does anything while USB keeps the clock awake instead of deep-sleeping.
 void loop() {
-  delay(100);
+  if (!usbWaitActive) {
+    delay(100);
+    return;
+  }
+  static bool functionArmed = false;
+  static bool setupArmed = false;
+  static uint8_t functionLowPolls = 0;
+  static uint8_t setupLowPolls = 0;
+  const uint32_t elapsedMs = millis() - usbWaitStartedMs;
+  if (elapsedMs < 200) {
+    // A button still held from the last wake must be released before it counts as a new press.
+    functionArmed = setupArmed = false;
+  }
+
+  // A press counts once the pin has read low on two polls in a row, so contact bounce or a
+  // glitch on the line never fakes one.
+  const bool functionDown = digitalRead(PIN_FUNCTION_BUTTON) == LOW;
+  const bool setupDown = digitalRead(PIN_SETUP_BUTTON) == LOW;
+  functionLowPolls = functionDown ? (uint8_t)min(functionLowPolls + 1, 2) : 0;
+  setupLowPolls = setupDown ? (uint8_t)min(setupLowPolls + 1, 2) : 0;
+  SimulatedWake next = SIMULATED_WAKE_NONE;
+  if (functionArmed && functionLowPolls >= 2) next = SIMULATED_WAKE_FUNCTION;
+  else if (setupArmed && setupLowPolls >= 2) next = SIMULATED_WAKE_SETUP;
+  else if (usbWaitHasTimer && elapsedMs >= usbWaitSeconds * 1000UL) next = SIMULATED_WAKE_TIMER;
+  if (!functionDown) functionArmed = true;
+  if (!setupDown) setupArmed = true;
+
+  if (next == SIMULATED_WAKE_NONE && !usbHostConnected()) {
+    // Unplugged from the computer: deep-sleep for whatever is left of the wait.
+    usbWaitActive = false;
+    const uint32_t elapsedSeconds = elapsedMs / 1000UL;
+    const uint32_t remaining = usbWaitSeconds > elapsedSeconds + 1 ? usbWaitSeconds - elapsedSeconds : 1;
+    Serial.println("[BlockClock] USB host gone: deep sleeping");
+    deepSleep(usbWaitHasTimer, remaining);
+    return;
+  }
+  if (next == SIMULATED_WAKE_NONE) {
+    delay(BUTTON_POLL_DELAY_MS);
+    return;
+  }
+
+  usbWaitActive = false;
+  // Days of in-process wakes can fragment the heap; HTTPS needs a large free block, so start
+  // clean if it runs short (the next boot fetches fresh data and redraws).
+  if (ESP.getMaxAllocHeap() < 48 * 1024) {
+    Serial.printf("[BlockClock] largest free heap block %u bytes: restarting\n", (unsigned)ESP.getMaxAllocHeap());
+    Serial.flush();
+    ESP.restart();
+  }
+  simulatedWake = next;
+  Serial.printf("[BlockClock] in-process wake (%s)\n",
+                next == SIMULATED_WAKE_TIMER ? "timer" : next == SIMULATED_WAKE_FUNCTION ? "FUNCTION" : "SETUP");
+  runWake();
+  simulatedWake = SIMULATED_WAKE_NONE;
 }

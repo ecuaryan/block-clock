@@ -265,6 +265,32 @@ static void buildMqttClientId(char* dst, size_t dstSize) {
   snprintf(dst, dstSize, "BlockClock-%s", deviceId);
 }
 
+// Upper-cases a ticker and drops anything Yahoo symbols never contain, so stray spaces, a "$" or
+// lower case typed on a phone still work; "BTC/USD" or "btc usd" become Yahoo's "BTC-USD".
+static void sanitizeTickerSymbol(char* symbol, size_t size) {
+  size_t out = 0;
+  bool dashPending = false;
+  for (size_t in = 0; symbol[in] != '\0' && out < size - 1; in++) {
+    const char c = (char)toupper((unsigned char)symbol[in]);
+    if (c == ' ' || c == '/') {
+      dashPending = out > 0;
+      continue;
+    }
+    if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '=' || c == '^')) continue;
+    // Only a gap between two letters or digits becomes a dash: "GC = F" stays "GC=F".
+    if (dashPending && isalnum((unsigned char)c) && isalnum((unsigned char)symbol[out - 1]) && out < size - 2) symbol[out++] = '-';
+    dashPending = false;
+    symbol[out++] = c;
+  }
+  symbol[out] = '\0';
+}
+
+static int tickerCount(const DeviceConfig& cfg) {
+  int count = 0;
+  for (int i = 0; i < MAX_TICKERS; i++) if (hasText(cfg.tickers[i])) count++;
+  return count;
+}
+
 static void normalizeDeviceConfig(DeviceConfig& cfg) {
   cfg.version = CONFIG_VERSION;
   cfg.dataSourceMode = (uint8_t)sanitizeDataSourceMode(cfg.dataSourceMode);
@@ -274,6 +300,21 @@ static void normalizeDeviceConfig(DeviceConfig& cfg) {
   cfg.displayThemeMode = (uint8_t)sanitizeThemeMode(cfg.displayThemeMode);
   cfg.quietStartHour = (uint8_t)clampInt(cfg.quietStartHour, 0, 23);
   cfg.quietEndHour = (uint8_t)clampInt(cfg.quietEndHour, 0, 23);
+  cfg.rotateSeconds = (uint16_t)clampInt(cfg.rotateSeconds, MIN_ROTATE_SECONDS, MAX_ROTATE_SECONDS);
+  // Sanitize, drop repeats, then pack the filled slots to the front so the screen has no gaps.
+  int filled = 0;
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    sanitizeTickerSymbol(cfg.tickers[i], sizeof(cfg.tickers[i]));
+    for (int j = 0; j < filled && hasText(cfg.tickers[i]); j++) {
+      if (strcmp(cfg.tickers[j], cfg.tickers[i]) == 0) cfg.tickers[i][0] = '\0';
+    }
+    if (!hasText(cfg.tickers[i])) continue;
+    if (filled != i) {
+      safeCopyCString(cfg.tickers[filled], sizeof(cfg.tickers[filled]), cfg.tickers[i]);
+      cfg.tickers[i][0] = '\0';
+    }
+    filled++;
+  }
   cfg.refreshIntervalMinutes = (uint16_t)clampInt(
     (int)cfg.refreshIntervalMinutes,
     MIN_REFRESH_INTERVAL_MINUTES,
@@ -301,6 +342,9 @@ static void applyDefaultDeviceConfig(DeviceConfig& cfg) {
   cfg.quietHoursEnabled = false;
   cfg.quietStartHour = DEFAULT_QUIET_START_HOUR;
   cfg.quietEndHour = DEFAULT_QUIET_END_HOUR;
+  cfg.rotateScreens = false;
+  cfg.rotateSeconds = DEFAULT_ROTATE_SECONDS;
+  cfg.watchlistEnabled = false;
   safeCopyCString(cfg.mqttServer, sizeof(cfg.mqttServer), DEFAULT_MQTT_SERVER);
   cfg.mqttPort = DEFAULT_MQTT_PORT;
   safeCopyCString(cfg.mqttUser, sizeof(cfg.mqttUser), DEFAULT_MQTT_USER);
@@ -335,6 +379,14 @@ static bool loadDeviceConfig(DeviceConfig& cfg) {
   cfg.quietHoursEnabled = preferences.getBool("quiet_on", false);
   cfg.quietStartHour    = (uint8_t)preferences.getUInt("quiet_start", DEFAULT_QUIET_START_HOUR);
   cfg.quietEndHour      = (uint8_t)preferences.getUInt("quiet_end",   DEFAULT_QUIET_END_HOUR);
+  cfg.rotateScreens     = preferences.getBool("rotate_on", false);
+  cfg.rotateSeconds     = (uint16_t)preferences.getUInt("rotate_sec", DEFAULT_ROTATE_SECONDS);
+  cfg.watchlistEnabled  = preferences.getBool("watch_on", false);
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "tick%d", i);
+    preferences.getString(key, cfg.tickers[i], sizeof(cfg.tickers[i]));
+  }
   preferences.getString("mqttsrv",     cfg.mqttServer,     sizeof(cfg.mqttServer));
   cfg.mqttPort          = (uint16_t)preferences.getUInt("mqttport",  DEFAULT_MQTT_PORT);
   preferences.getString("mqttuser",    cfg.mqttUser,       sizeof(cfg.mqttUser));
@@ -374,6 +426,14 @@ static bool saveDeviceConfig(const DeviceConfig& cfg) {
   preferences.putBool("quiet_on",    copy.quietHoursEnabled);
   preferences.putUInt("quiet_start", (uint32_t)copy.quietStartHour);
   preferences.putUInt("quiet_end",   (uint32_t)copy.quietEndHour);
+  preferences.putBool("rotate_on",   copy.rotateScreens);
+  preferences.putUInt("rotate_sec",  (uint32_t)copy.rotateSeconds);
+  preferences.putBool("watch_on",    copy.watchlistEnabled);
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "tick%d", i);
+    preferences.putString(key, copy.tickers[i]);
+  }
   preferences.putString("mqttsrv",  copy.mqttServer);
   preferences.putUInt("mqttport",   (uint32_t)copy.mqttPort);
   preferences.putString("mqttuser", copy.mqttUser);

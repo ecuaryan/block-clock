@@ -66,6 +66,9 @@ enum BatteryDisplayMode : uint8_t {
   BATTERY_DISPLAY_ICON_PERCENT = 2
 };
 
+static constexpr int MAX_TICKERS = 6;
+static constexpr size_t TICKER_SYMBOL_SIZE = 13;
+
 struct DeviceConfig {
   uint32_t version;
   bool configured;
@@ -82,6 +85,10 @@ struct DeviceConfig {
   bool quietHoursEnabled;
   uint8_t quietStartHour;  // local hour 0-23 when quiet hours begin
   uint8_t quietEndHour;    // local hour 0-23 when refreshing resumes
+  bool rotateScreens;      // flip to the next screen on a timer, between refreshes
+  uint16_t rotateSeconds;  // how often to flip when rotateScreens is on
+  bool watchlistEnabled;   // add a screen with the prices of the tickers below
+  char tickers[MAX_TICKERS][TICKER_SYMBOL_SIZE];  // Yahoo Finance symbols, e.g. MSTR or ETH-USD; empty slots are skipped
   char mqttServer[64];
   uint16_t mqttPort;
   char mqttUser[64];
@@ -90,6 +97,12 @@ struct DeviceConfig {
   char topicHalving[96];
   char topicHashrate[96];
   char topicPriceValue[96];
+};
+
+struct TickerQuote {
+  char symbol[TICKER_SYMBOL_SIZE];  // which ticker this quote is for, so a changed watchlist never shows stale prices
+  double price;      // 0 when unknown
+  float changePct;   // percent change since the previous close, NAN when unknown
 };
 
 struct BlockData {
@@ -108,8 +121,11 @@ struct BlockData {
   uint8_t athCurrency;        // currency the stored all-time high is in
   float batteryVoltage;
   int batteryPercent;
-  time_t updatedAt;
+  time_t updatedAt;           // when the price was last fetched, 0 when never
+  time_t networkUpdatedAt;    // when the block height (and so the Network and Supply screens) was last fetched
   time_t nextRefreshAt;       // when the clock plans to wake and refresh, 0 when unknown
+  TickerQuote tickerQuotes[MAX_TICKERS];
+  time_t tickersUpdatedAt;    // when watchlist prices last came in, 0 when never
   bool wifiOk;
   bool dataOk;
 };
@@ -146,6 +162,10 @@ static constexpr uint16_t MAX_REFRESH_INTERVAL_MINUTES = 10080;
 static constexpr uint16_t DEFAULT_REFRESH_INTERVAL_MINUTES = 10;
 static constexpr uint8_t DEFAULT_QUIET_START_HOUR = 23;
 static constexpr uint8_t DEFAULT_QUIET_END_HOUR = 6;
+static constexpr uint16_t MIN_ROTATE_SECONDS = 15;          // each flip is a full e-ink redraw
+static constexpr uint16_t MAX_ROTATE_SECONDS = 12 * 60 * 60;
+static constexpr uint16_t DEFAULT_ROTATE_SECONDS = 60;
+static constexpr uint16_t ROTATE_REFRESH_LEAD_SECONDS = 10; // a flip due this close to a refresh waits for the refresh
 
 static constexpr char DEFAULT_MQTT_SERVER[] = "mqtt.local";
 static constexpr uint16_t DEFAULT_MQTT_PORT = 1883;
@@ -169,6 +189,7 @@ static constexpr char COINGECKO_MARKETS_URL_PREFIX[] = "https://api.coingecko.co
 static constexpr char COINGECKO_MARKETS_URL_SUFFIX[] = "&ids=bitcoin&per_page=1&page=1&sparkline=false";
 static constexpr uint32_t ATH_REFRESH_SECONDS = 6UL * 60UL * 60UL;  // the all-time high rarely moves
 static constexpr uint32_t ATH_RETRY_SECONDS = 3UL * 60UL;           // after a failed check (CoinGecko rate limits), wait before asking again
+static constexpr char YAHOO_SPARK_URL_PREFIX[] = "https://query1.finance.yahoo.com/v8/finance/spark?range=1d&interval=1d&symbols=";
 static constexpr uint32_t HALVING_INTERVAL_BLOCKS = 210000UL;
 
 // ============================================================

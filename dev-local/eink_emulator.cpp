@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cctype>
 #include "font_metrics.h"
 
 using String = std::string;
@@ -328,6 +329,9 @@ static void esp_qrcode_generate(const esp_qrcode_config_t* config, const char* d
 
 #include "../src/display_screens.h"
 
+// --stale-hours N makes the demo data N hours old, to preview the "LAST UPDATED" footer.
+static long demoStaleSeconds = 0;
+
 static BlockData demoData() {
   BlockData data = {};
   std::snprintf(data.blockHeight, sizeof(data.blockHeight), "%s", "950123");
@@ -345,19 +349,44 @@ static BlockData demoData() {
   data.athTimestamp = std::time(nullptr) - (383L * 86400);
   data.updatedAt = std::time(nullptr);
   data.nextRefreshAt = data.updatedAt + 10 * 60;
+  data.updatedAt -= demoStaleSeconds;
+  data.networkUpdatedAt = data.updatedAt;
+  data.tickersUpdatedAt = data.updatedAt;
   data.wifiOk = true;
   data.dataOk = true;
+  const struct { const char* symbol; double price; float change; } quotes[] = {
+    { "MSTR", 122.35, 1.06f }, { "ETH-USD", 2075.34, 1.20f }, { "AAPL", 355.63, -0.42f },
+    { "^GSPC", 6891.2, 0.31f }, { "GC=F", 4012.5, -1.18f }, { "SOL-USD", 0.5123, 3.4f },
+  };
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    std::snprintf(data.tickerQuotes[i].symbol, sizeof(data.tickerQuotes[i].symbol), "%s", quotes[i].symbol);
+    data.tickerQuotes[i].price = quotes[i].price;
+    data.tickerQuotes[i].changePct = quotes[i].change;
+  }
   return data;
 }
 
+// --tickers N picks how many watchlist tickers the demo config has (default 6).
+static int demoTickerCount = MAX_TICKERS;
+
+static void applyDemoWatchlist() {
+  const BlockData data = demoData();
+  deviceConfig.watchlistEnabled = true;
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    std::snprintf(deviceConfig.tickers[i], sizeof(deviceConfig.tickers[i]), "%s", i < demoTickerCount ? data.tickerQuotes[i].symbol : "");
+  }
+}
+
 static void renderScreen(const std::string& screen) {
-  if (screen == "main" || screen == "network" || screen == "supply") {
+  applyDemoWatchlist();
+  if (screen == "main" || screen == "network" || screen == "supply" || screen == "watchlist") {
     BlockData data = demoData();
     deviceConfig.configured = true;
     deviceConfig.currencyCode = DEFAULT_CURRENCY_CODE;
+    deviceConfig.refreshIntervalMinutes = 10;
     deviceConfig.displayThemeMode = DEFAULT_DISPLAY_THEME_MODE;
     deviceConfig.batteryDisplayMode = BATTERY_DISPLAY_ICON_PERCENT;
-    drawBlockDashboard(data, deviceConfig, screen == "network" ? 1 : screen == "supply" ? 2 : 0);
+    drawBlockDashboard(data, deviceConfig, screen == "network" ? 1 : screen == "supply" ? 2 : screen == "watchlist" ? 3 : 0);
   } else if (screen == "loading") {
     drawBrandedStatusScreen("CONNECTING", "Fetching data", false);
   } else if (screen == "welcome") {
@@ -381,13 +410,15 @@ int main(int argc, char** argv) {
   for (int index = 1; index < argc; index++) {
     const std::string argument = argv[index];
     if (argument == "--help" || argument == "-h") {
-      std::cout << "Usage: eink_emulator [--profile e290|e213] [--screen main|network|supply|loading|welcome|setup|saved|reset] [--out path.svg]\n";
+      std::cout << "Usage: eink_emulator [--profile e290|e213] [--screen main|network|supply|watchlist|loading|welcome|setup|saved|reset] [--tickers 1-6] [--stale-hours N] [--out path.svg]\n";
       return 0;
     }
-    if ((argument == "--profile" || argument == "--screen" || argument == "--out") && index + 1 < argc) {
+    if ((argument == "--profile" || argument == "--screen" || argument == "--out" || argument == "--tickers" || argument == "--stale-hours") && index + 1 < argc) {
       const std::string value = argv[++index];
       if (argument == "--profile") profile = value;
       else if (argument == "--screen") screen = value;
+      else if (argument == "--tickers") demoTickerCount = clampInt(std::atoi(value.c_str()), 1, MAX_TICKERS);
+      else if (argument == "--stale-hours") demoStaleSeconds = std::atol(value.c_str()) * 3600L;
       else outputPath = value;
     } else {
       std::cerr << "Unexpected argument: " << argument << '\n';

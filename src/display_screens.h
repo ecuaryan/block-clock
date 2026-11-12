@@ -456,7 +456,19 @@ static void formatFiatFromSats(int64_t sats, long price, const char* prefix, cha
 
 
 static constexpr uint64_t MAX_SUPPLY_SATS = 2100000000000000ULL;
-static constexpr int DASHBOARD_SCREEN_COUNT = 3;
+static constexpr int BASE_SCREEN_COUNT = 3;
+static constexpr int WATCHLIST_SCREEN_INDEX = 3;
+
+static bool watchlistScreenShown(const DeviceConfig& cfg) {
+  if (!cfg.watchlistEnabled) return false;
+  for (int i = 0; i < MAX_TICKERS; i++) if (cfg.tickers[i][0] != '\0') return true;
+  return false;
+}
+
+// Price, Network and Supply, plus the Watchlist when it is turned on and has tickers.
+static int dashboardScreenCount(const DeviceConfig& cfg) {
+  return BASE_SCREEN_COUNT + (watchlistScreenShown(cfg) ? 1 : 0);
+}
 
 // Coins issued through `tipHeight` (genesis included), in sats.
 static uint64_t issuedSupplySats(uint32_t tipHeight) {
@@ -530,17 +542,45 @@ static void formatNextRefresh(time_t when, char* output, size_t outputSize) {
   }
 }
 
+// "LAST UPDATED 4:46 PM" (or "LAST UPDATED NOV 9") when `dataTime` is older than one refresh
+// interval plus a little slack, i.e. the last refresh did not bring this screen's data in. Empty
+// when the data is fresh, or when there is no valid time to judge by.
+static void formatStaleLabel(time_t dataTime, const DeviceConfig& cfg, char* output, size_t outputSize) {
+  output[0] = '\0';
+  const time_t now = time(nullptr);
+  const time_t staleAfter = (time_t)cfg.refreshIntervalMinutes * 60 + 120;
+  struct tm fetched = {};
+  struct tm today = {};
+  if (dataTime < 1700000000 || now < 1700000000 || now - dataTime <= staleAfter) return;
+  if (!localtime_r(&dataTime, &fetched) || !localtime_r(&now, &today)) return;
+  if (fetched.tm_yday == today.tm_yday && fetched.tm_year == today.tm_year) {
+    const int hour12 = (fetched.tm_hour % 12) == 0 ? 12 : (fetched.tm_hour % 12);
+    snprintf(output, outputSize, "LAST UPDATED %d:%02d %s", hour12, fetched.tm_min, fetched.tm_hour < 12 ? "AM" : "PM");
+  } else {
+    char month[8];
+    strftime(month, sizeof(month), "%b", &fetched);
+    for (char* c = month; *c; c++) *c = (char)toupper((unsigned char)*c);
+    snprintf(output, outputSize, "LAST UPDATED %s %d", month, fetched.tm_mday);
+  }
+}
+
 // Footer: what this screen is about (left), when the next refresh is due, and which screen this is (right).
-static void drawFooter(int current, const char* title, const DisplayThemeColors& theme, time_t nextRefreshAt) {
+// When the screen's data is out of date the title gives way to a black "LAST UPDATED ..." chip, so
+// old numbers never pass for current ones.
+static void drawFooter(int current, int screenCount, const char* title, const DisplayThemeColors& theme, time_t nextRefreshAt,
+                       time_t dataTime, const DeviceConfig& cfg) {
   static constexpr int DOT = 5;
   static constexpr int PITCH = 9;
   const int y = DEVICE_DISPLAY_HEIGHT - 13;  // clear of the case lip
-  drawTextSize1(title, DASH_MARGIN, y);
-  const int left = DEVICE_DISPLAY_WIDTH - DASH_MARGIN - ((DASHBOARD_SCREEN_COUNT * PITCH) - (PITCH - DOT));
+  char staleLabel[32];
+  formatStaleLabel(dataTime, cfg, staleLabel, sizeof(staleLabel));
+  if (staleLabel[0]) drawChip(staleLabel, DASH_MARGIN, y - 1, theme);
+  else drawTextSize1(title, DASH_MARGIN, y);
+  const int left = DEVICE_DISPLAY_WIDTH - DASH_MARGIN - ((screenCount * PITCH) - (PITCH - DOT));
   char nextText[24];
   formatNextRefresh(nextRefreshAt, nextText, sizeof(nextText));
   if (nextText[0]) drawTextSize1(nextText, left - 8 - estimateTextWidthSize1(nextText), y);
-  for (int index = 0; index < DASHBOARD_SCREEN_COUNT; index++) {
+  for (int index = 0; index < screenCount; index++) {
     const int x = left + (index * PITCH);
     display.fillRect(x, y + 1, DOT, DOT, theme.foreground);
     if (index != current) display.fillRect(x + 1, y + 2, DOT - 2, DOT - 2, theme.background);
@@ -646,7 +686,7 @@ static void drawPriceScreen(const BlockData& data, const DeviceConfig& cfg) {
   drawSizedText(fromAth, CELL_X[2], CELL_Y + 12, 2);
   drawTextSize1(athAge, CELL_X[2], CELL_Y + 31);
 
-  drawFooter(0, "WHAT IT IS WORTH", theme, data.nextRefreshAt);
+  drawFooter(0, dashboardScreenCount(cfg), "WHAT IT IS WORTH", theme, data.nextRefreshAt, data.updatedAt, cfg);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }
@@ -727,7 +767,7 @@ static void drawNetworkScreen(const BlockData& data, const DeviceConfig& cfg) {
   }
   drawTextSize1("sat/vB", DASH_MARGIN + (3 * feeColumnWidth) + 4, 103);
 
-  drawFooter(1, "THE NETWORK RIGHT NOW", theme, data.nextRefreshAt);
+  drawFooter(1, dashboardScreenCount(cfg), "THE NETWORK RIGHT NOW", theme, data.nextRefreshAt, data.networkUpdatedAt, cfg);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }
@@ -804,15 +844,147 @@ static void drawSupplyScreen(const BlockData& data, const DeviceConfig& cfg) {
   drawApproxText(perDay, CELL_X[2], CELL_Y + 12, 2, theme);
   drawTextSize1("BTC per day", CELL_X[2], CELL_Y + 31);
 
-  drawFooter(2, "HOW SCARCE IT IS", theme, data.nextRefreshAt);
+  drawFooter(2, dashboardScreenCount(cfg), "HOW SCARCE IT IS", theme, data.nextRefreshAt, data.networkUpdatedAt, cfg);
+  drawStatusIcons(data, cfg, themeMode);
+  display.update();
+}
+
+// "ETH-USD" reads as "ETH": the quote currency adds nothing on a small screen.
+static void tickerDisplayName(const char* symbol, char* output, size_t outputSize) {
+  snprintf(output, outputSize, "%s", symbol ? symbol : "");
+  const size_t length = strlen(output);
+  if (length > 4 && strcmp(output + length - 4, "-USD") == 0) output[length - 4] = '\0';
+}
+
+// 103,456 / 412.30 / 0.5123 / 0.000012: whole numbers once the cents stop mattering, more places for
+// coins worth pennies, and four places for exchange rates such as EURUSD=X (1.0843).
+static void formatTickerPrice(double price, const char* symbol, char* output, size_t outputSize) {
+  if (!(price > 0.0)) {
+    snprintf(output, outputSize, "--");
+    return;
+  }
+  const size_t symbolLength = symbol ? strlen(symbol) : 0;
+  const bool exchangeRate = symbolLength > 2 && strcmp(symbol + symbolLength - 2, "=X") == 0;
+  char raw[24];
+  if (price >= 10000.0) snprintf(raw, sizeof(raw), "%.0f", price);
+  else if (exchangeRate && price < 10.0) snprintf(raw, sizeof(raw), "%.4f", price);
+  else if (price >= 1.0) snprintf(raw, sizeof(raw), "%.2f", price);
+  else if (price >= 0.01) snprintf(raw, sizeof(raw), "%.4f", price);
+  else snprintf(raw, sizeof(raw), "%.6f", price);
+  formatPriceWithCommas(raw, output, outputSize);
+}
+
+// "+1.23%", fewer places once the move is big so the text stays short; empty when unknown.
+static void formatTickerChange(const TickerQuote* quote, char* output, size_t outputSize) {
+  output[0] = '\0';
+  if (!quote || isnan(quote->changePct)) return;
+  float pct = quote->changePct;
+  if (fabsf(pct) < 0.005f) pct = 0.0f;  // never "-0.00%"
+  const float magnitude = fabsf(pct);
+  // Thresholds sit just under 100 and 10 so rounding never prints "-100.0%" or "+10.00%".
+  if (magnitude >= 99.95f) snprintf(output, outputSize, "%+.0f%%", pct);
+  else if (magnitude >= 9.995f) snprintf(output, outputSize, "%+.1f%%", pct);
+  else snprintf(output, outputSize, "%+.2f%%", pct);
+}
+
+static const TickerQuote* quoteFor(const BlockData& data, const char* symbol) {
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    if (data.tickerQuotes[i].price > 0.0 && strcmp(data.tickerQuotes[i].symbol, symbol) == 0) return &data.tickerQuotes[i];
+  }
+  return nullptr;
+}
+
+// Screen 4 (optional): the prices of up to six tickers the owner picked in setup.
+static void drawWatchlistScreen(const BlockData& data, const DeviceConfig& cfg) {
+  const DisplayThemeMode themeMode = sanitizeThemeMode(cfg.displayThemeMode);
+  const DisplayThemeColors theme = getDisplayThemeColors(themeMode);
+  prepareScreen(themeMode);
+
+  const char* symbols[MAX_TICKERS];
+  int count = 0;
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    if (cfg.tickers[i][0] != '\0') symbols[count++] = cfg.tickers[i];
+  }
+
+  // Up to three tickers get a full-width row each; four to six share two columns.
+  static constexpr int TOP_Y = 2;
+  static constexpr int BOTTOM_Y = DEVICE_DISPLAY_HEIGHT - 17;  // above the footer
+  const int columns = count <= 3 ? 1 : 2;
+  const int rows = count > 0 ? (count + columns - 1) / columns : 1;
+  const int rowH = (BOTTOM_Y - TOP_Y) / rows;
+  const int columnW = (DEVICE_DISPLAY_WIDTH - (2 * DASH_MARGIN)) / columns;
+
+  // In the single-column layout every price starts at the same x, just past the widest name.
+  int nameColumnW = 0;
+  for (int index = 0; index < count; index++) {
+    char name[TICKER_SYMBOL_SIZE];
+    tickerDisplayName(symbols[index], name, sizeof(name));
+    const int chipW = estimateTextWidthSize1(name) + 3;
+    const int changeW = estimateTextWidthSize1("+00.00%");
+    nameColumnW = clampInt(chipW > changeW ? chipW : changeW, nameColumnW, DEVICE_DISPLAY_WIDTH);
+  }
+  // Keep clear of the battery and Wi-Fi icons in the top-right corner.
+  static constexpr int STATUS_CORNER_X = DEVICE_DISPLAY_WIDTH - 58;
+  const int priceRoom = columns == 1 ? columnW - nameColumnW - 10 : columnW - 8;
+  const int firstRowRoom = columns == 1 && rows == 3 ? STATUS_CORNER_X - (DASH_MARGIN + nameColumnW + 10) : priceRoom;
+
+  // One text size for every price, the largest that fits the longest one, so the grid reads evenly.
+  int priceSize = columns == 1 ? (rowH >= 60 ? 4 : 3) : (rowH >= 40 ? 3 : 2);
+  for (int index = 0; index < count; index++) {
+    const TickerQuote* quote = quoteFor(data, symbols[index]);
+    char priceText[24];
+    formatTickerPrice(quote ? quote->price : 0.0, symbols[index], priceText, sizeof(priceText));
+    priceSize = fitTextSizeForWidth(priceText, index == 0 ? firstRowRoom : priceRoom, priceSize);
+  }
+
+  for (int index = 0; index < count; index++) {
+    const int column = columns == 1 ? 0 : index % columns;
+    const int row = columns == 1 ? index : index / columns;
+    const int x = DASH_MARGIN + (column * columnW);
+    const int y = TOP_Y + (row * rowH);
+
+    char name[TICKER_SYMBOL_SIZE];
+    tickerDisplayName(symbols[index], name, sizeof(name));
+    const TickerQuote* quote = quoteFor(data, symbols[index]);
+    char priceText[24];
+    formatTickerPrice(quote ? quote->price : 0.0, symbols[index], priceText, sizeof(priceText));
+    char changeText[16];
+    formatTickerChange(quote, changeText, sizeof(changeText));
+
+    if (columns == 1) {
+      // Name over the day change on the left, a big price beside them.
+      const int middle = y + (rowH / 2);
+      drawChip(name, x, middle - 10, theme);
+      drawTextSize1(changeText, x, middle + 2);
+      drawSizedText(priceText, x + nameColumnW + 10, middle - (4 * priceSize), priceSize);
+    } else {
+      // Name and day change on one line, the price underneath.
+      const int top = y + clampInt((rowH - (12 + (8 * priceSize))) / 2, 2, rowH);
+      const int chipW = drawChip(name, x, top, theme);
+      // The top-right cell shares its first line with the battery and Wi-Fi icons.
+      const int lineEnd = row == 0 && column == 1 ? STATUS_CORNER_X : x + columnW - 8;
+      const int changeX = x + chipW + 6;
+      if (changeX + estimateTextWidthSize1(changeText) <= lineEnd) drawTextSize1(changeText, changeX, top + 1);
+      drawSizedText(priceText, x, top + 12, priceSize);
+    }
+    if (row > 0 && column == 0) display.drawLine(DASH_MARGIN, y - 1, DEVICE_DISPLAY_WIDTH - DASH_MARGIN, y - 1, theme.foreground);
+  }
+  if (columns == 2) {
+    const int dividerX = DASH_MARGIN + columnW - 4;
+    display.drawLine(dividerX, TOP_Y + 2, dividerX, TOP_Y + (rows * rowH) - 3, theme.foreground);
+  }
+
+  drawFooter(WATCHLIST_SCREEN_INDEX, dashboardScreenCount(cfg), "WATCHLIST", theme, data.nextRefreshAt, data.tickersUpdatedAt, cfg);
   drawStatusIcons(data, cfg, themeMode);
   display.update();
 }
 
 static void drawBlockDashboard(const BlockData& data, const DeviceConfig& cfg, int screenIndex = 0) {
+  if (screenIndex >= dashboardScreenCount(cfg)) screenIndex = 0;
   switch (screenIndex) {
     case 1: drawNetworkScreen(data, cfg); break;
     case 2: drawSupplyScreen(data, cfg); break;
+    case WATCHLIST_SCREEN_INDEX: drawWatchlistScreen(data, cfg); break;
     default: drawPriceScreen(data, cfg); break;
   }
 }

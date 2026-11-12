@@ -25,6 +25,8 @@ Both boards use the same source code. The firmware selects the right display dri
 - Network hashrate in EH/s
 - Recommended low, medium, and high transaction fees in sat/vB
 - Minutes since the latest Bitcoin block
+- Optional watchlist screen: price and day change for up to six stocks, ETFs, indices or coins
+- Never passes off old numbers as current: when a screen's data could not be refreshed, its footer turns into a black "LAST UPDATED 4:50 PM" label (fee rates and last-block details that fail to load show `--` instead)
 - Wi-Fi offline icon when the last fetch failed
 - Last update time
 - Light or dark display theme
@@ -84,7 +86,9 @@ http://192.168.4.1
 
 The setup page lets you configure:
 
-- Wi-Fi network and password, plus an optional backup network (for example a phone hotspot). The clock tries the network that worked last, then the other; if neither is reachable it retries every 15 minutes at most, however long the refresh interval is
+- Wi-Fi network and password, plus an optional backup network (for example a phone hotspot). The clock tries the network that worked last, then the other; if neither is reachable it retries every 15 minutes at most, however long the refresh interval is. Settings save as long as one of the two connects, so you can set the clock up on the hotspot alone; if a network is in range but refuses the password, the page asks before saving
+- Auto-rotate: flip to the next screen on a timer (every 15 seconds to 12 hours) between data refreshes. It pauses during quiet hours
+- Watchlist: up to six [Yahoo Finance](https://finance.yahoo.com) symbols, such as `MSTR`, `AAPL`, `ETH-USD`, `^GSPC` (S&P 500) or `GC=F` (gold), shown on a fourth screen. The setup page checks that each symbol exists. Prices come from Yahoo Finance in both data modes
 - Data source: online or MQTT
 - Currency: USD, EUR, CHF, GBP, CAD, or AUD
 - Refresh interval
@@ -98,7 +102,7 @@ There is no setup PIN. Block Clock does not store personal financial data.
 
 ## Buttons
 
-- `FUNCTION` (`GPIO21`): a quick tap while the clock is asleep flips to the next screen (Price, Network, Supply) from the last fetched data, with no network wait. Hold for about 1.5 seconds to fetch fresh data instead.
+- `FUNCTION` (`GPIO21`): a quick tap while the clock is asleep flips to the next screen (Price, Network, Supply, and Watchlist when it is on) from the last fetched data, with no network wait. Hold for about 1.5 seconds to fetch fresh data instead.
 - `SETUP` (`BOOT / GPIO0`): a quick tap flips screens too, so either button works for browsing. Hold for about 3 seconds to enter setup mode. Hold for about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
 
 The clock stays on the screen you picked when it refreshes on its timer.
@@ -147,6 +151,8 @@ Main defaults are in [src/config.h](src/config.h).
    The three-screen dashboard is laid out for the E290 (296 × 128). The E213 profile still builds, but its layout has not been adapted to the smaller 250 × 122 panel.
 6. Upload the sketch.
 7. Press the RST button on the device once the upload starts if the board does not enter flash mode automatically.
+
+   While the clock is plugged into a computer it stays awake between refreshes instead of deep-sleeping, so the USB port never drops out and uploads work at any time. On a charger or battery it deep-sleeps as usual. This needs the default `USB Mode: Hardware CDC and JTAG` setting in Tools.
 8. Join the device setup Wi-Fi and configure it in the browser.
 
 ## Optional Secrets Bootstrap
@@ -171,7 +177,7 @@ Render one screen:
 ./dev-local/eink_emulator.sh --profile e290 --screen main --out /tmp/block-clock-main.svg
 ```
 
-Supported screens: `main` (price), `network`, `supply`, `loading`, `welcome`, `setup`, `saved`, `reset`. The generated gallery is written under `dev-local/eink-screens/`, which is ignored by git.
+Supported screens: `main` (price), `network`, `supply`, `watchlist` (add `--tickers 1-6` to try other counts; add `--stale-hours N` to any data screen to preview the "LAST UPDATED" footer), `loading`, `welcome`, `setup`, `saved`, `reset`. The generated gallery is written under `dev-local/eink-screens/`, which is ignored by git.
 
 ## Code Structure
 

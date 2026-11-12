@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 OUTPUT_DIR="$SCRIPT_DIR/eink-screens"
-SCREENS="main network supply loading welcome setup saved reset"
+SCREENS="main network supply watchlist loading welcome setup saved reset"
 # Versioned image links so a refresh never shows a cached older render.
 VERSION=$(date +%s)
 

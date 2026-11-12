@@ -109,6 +109,11 @@ static bool fetchBlockDataFromMqtt(const DeviceConfig& cfg, BlockData& outData) 
   }
 
   mqttTargetData = nullptr;
+  const time_t now = time(nullptr);
+  if (now >= 1700000000) {
+    if (gotPrice) outData.updatedAt = now;
+    if (gotHeight) outData.networkUpdatedAt = now;
+  }
   return gotHeight || gotHalving || gotHashrate || gotPrice;
 }
 
@@ -117,7 +122,9 @@ static bool configureOnlineClient(WiFiClientSecure& client) {
   return true;
 }
 
-static bool httpGetString(const char* url, String& payload) {
+// `statusOut`, when given, gets the HTTP status (or a negative HTTPClient error) even when the call fails.
+static bool httpGetString(const char* url, String& payload, int* statusOut = nullptr) {
+  if (statusOut) *statusOut = 0;
   if (WiFi.status() != WL_CONNECTED || !url || !url[0]) return false;
 
   WiFiClientSecure secureClient;
@@ -131,6 +138,7 @@ static bool httpGetString(const char* url, String& payload) {
   http.addHeader("Accept", "application/json,text/plain");
   http.addHeader("User-Agent", "BlockClock/2026");
   const int httpCode = http.GET();
+  if (statusOut) *statusOut = httpCode;
   if (httpCode != HTTP_CODE_OK) {
     http.end();
     return false;
@@ -208,7 +216,9 @@ static bool fetchOnlineHashrate(BlockData& outData) {
   return true;
 }
 
+// Fee rates move by the minute, so a failed fetch blanks them ("--") rather than showing old ones.
 static void fetchOnlinePreciseFees(BlockData& outData) {
+  outData.lowFeeSatVb = outData.mediumFeeSatVb = outData.highFeeSatVb = -1.0f;
   String payload;
   if (!httpGetString(MEMPOOL_PRECISE_FEES_URL, payload)) return;
 
@@ -225,7 +235,11 @@ static void fetchOnlinePreciseFees(BlockData& outData) {
   }
 }
 
+// The age and fees of the block at the current height; blanked when they cannot be fetched, so an
+// older block's numbers never sit under a newer height.
 static void fetchOnlineLastBlockInfo(BlockData& outData) {
+  outData.lastBlockTimestamp = 0;
+  outData.lastBlockFeesSats = -1;
   if (!hasText(outData.blockHeight) || !isUsefulDataValue(outData.blockHeight)) return;
 
   String hashUrl = MEMPOOL_BLOCK_HASH_URL_PREFIX;
@@ -330,15 +344,82 @@ static void fetchCoinGeckoAth(const DeviceConfig& cfg, BlockData& outData) {
   saveAth(outData);
 }
 
-static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {
-  bool ok = false;
-  const bool heightOk = fetchOnlineHeight(outData);
-  ok = heightOk || ok;
-  ok = fetchOnlineHashrate(outData) || ok;
-  if (!fetchMempoolPrice(cfg, outData)) {
-    ok = fetchCoinGeckoPrice(cfg, outData) || ok;
+// Watchlist prices from Yahoo Finance's spark endpoint: one request covers every ticker, needs no
+// API key, and handles stocks, ETFs, indices (^GSPC), futures (GC=F) and crypto pairs (ETH-USD).
+// Symbols Yahoo does not know are simply missing from the reply; their names are listed in
+// `unknown` (comma separated) when the caller asks. Returns false when the request itself failed.
+static bool fetchTickerQuotes(const DeviceConfig& cfg, BlockData& outData, String* unknown = nullptr) {
+  if (tickerCount(cfg) == 0) return true;
+  String url = YAHOO_SPARK_URL_PREFIX;
+  bool first = true;
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    if (!hasText(cfg.tickers[i])) continue;
+    if (!first) url += ',';
+    first = false;
+    for (const char* c = cfg.tickers[i]; *c; c++) {
+      if (*c == '^') url += F("%5E");
+      else if (*c == '=') url += F("%3D");
+      else url += *c;
+    }
+  }
+  String payload;
+  int status = 0;
+  JsonDocument doc;
+  if (!httpGetString(url.c_str(), payload, &status)) {
+    // When none of the symbols exist Yahoo answers 404 rather than an empty object.
+    if (status != 404) return false;
   } else {
-    ok = true;
+    JsonDocument filter;
+    for (int i = 0; i < MAX_TICKERS; i++) {
+      if (!hasText(cfg.tickers[i])) continue;
+      filter[cfg.tickers[i]]["close"] = true;
+      filter[cfg.tickers[i]]["chartPreviousClose"] = true;
+    }
+    if (deserializeJson(doc, payload, DeserializationOption::Filter(filter))) return false;
+  }
+
+  bool gotPrice = false;
+  for (int i = 0; i < MAX_TICKERS; i++) {
+    TickerQuote& quote = outData.tickerQuotes[i];
+    if (!hasText(cfg.tickers[i])) {
+      memset(&quote, 0, sizeof(quote));
+      continue;
+    }
+    JsonVariantConst entry = doc[cfg.tickers[i]];
+    double price = 0.0;
+    JsonArrayConst closes = entry["close"].as<JsonArrayConst>();
+    for (JsonVariantConst close : closes) {
+      if (close.is<double>() && close.as<double>() > 0.0) price = close.as<double>();
+    }
+    if (price <= 0.0) {
+      if (unknown) {
+        if (unknown->length()) *unknown += F(", ");
+        *unknown += cfg.tickers[i];
+      }
+      // Keep the last good price for this ticker rather than blanking it on one bad reply.
+      if (strcmp(quote.symbol, cfg.tickers[i]) != 0) memset(&quote, 0, sizeof(quote));
+      continue;
+    }
+    gotPrice = true;
+    const double previousClose = entry["chartPreviousClose"] | 0.0;
+    safeCopyCString(quote.symbol, sizeof(quote.symbol), cfg.tickers[i]);
+    quote.price = price;
+    quote.changePct = previousClose > 0.0 ? (float)((price / previousClose - 1.0) * 100.0) : NAN;
+  }
+  const time_t now = time(nullptr);
+  if (gotPrice && now >= 1700000000) outData.tickersUpdatedAt = now;
+  return true;
+}
+
+static bool fetchBlockDataOnline(const DeviceConfig& cfg, BlockData& outData) {
+  const bool heightOk = fetchOnlineHeight(outData);
+  const bool hashrateOk = fetchOnlineHashrate(outData);
+  const bool priceOk = fetchMempoolPrice(cfg, outData) || fetchCoinGeckoPrice(cfg, outData);
+  const bool ok = heightOk || hashrateOk || priceOk;
+  const time_t now = time(nullptr);
+  if (now >= 1700000000) {
+    if (priceOk) outData.updatedAt = now;
+    if (heightOk) outData.networkUpdatedAt = now;
   }
   fetchOnlinePreciseFees(outData);
   if (heightOk) fetchOnlineLastBlockInfo(outData);
