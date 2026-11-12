@@ -103,7 +103,7 @@ There is no setup PIN. Block Clock does not store personal financial data.
 ## Buttons
 
 - `FUNCTION` (`GPIO21`): a quick tap while the clock is asleep flips to the next screen (Price, Network, Supply, and Watchlist when it is on) from the last fetched data, with no network wait. Hold for about 1.5 seconds to fetch fresh data instead.
-- `SETUP` (`BOOT / GPIO0`): a quick tap flips screens too, so either button works for browsing. Hold for about 3 seconds to enter setup mode. Hold for about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
+- `SETUP` (`BOOT / GPIO0`): a quick tap flips screens too, so either button works for browsing. Hold for about 3 seconds to enter setup mode: the setup screen appears as soon as the 3 seconds are up, while you are still holding. Keep holding to about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
 
 The clock stays on the screen you picked when it refreshes on its timer.
 

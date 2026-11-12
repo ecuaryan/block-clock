@@ -141,7 +141,7 @@ static String portalPage() {
   html += F("<div class=\"wrap\">");
   html += F("<section class=\"hero\">");
   appendPortalBrandHeader(html);
-  html += F("<p>Press SETUP once to enter setup mode, or hold SETUP for about 10 seconds to clear all settings (factory reset).</p>");
+  html += F("<p>To get back here, hold SETUP (the square button) for 3 seconds. Holding it for about 10 seconds clears all settings (factory reset).</p>");
   html += F("</section>");
   html += F("<form id=\"setup_form\" method=\"post\" action=\"/save\">");
 
@@ -647,8 +647,10 @@ static void runSetupPortal() {
   startPortalServers();
   drawSetupPortalReadyScreen();
 
-  bool factoryResetHoldActive = false;
-  uint32_t factoryResetHoldStartedMs = 0;
+  // A SETUP hold that opened setup keeps counting toward a factory reset from when it began.
+  bool factoryResetHoldActive = digitalRead(PIN_SETUP_BUTTON) == LOW && setupHoldStartedMs != 0;
+  uint32_t factoryResetHoldStartedMs = setupHoldStartedMs;
+  setupHoldStartedMs = 0;
   while (!portalShouldRestart) {
     portalDnsServer.processNextRequest();
     portalServer.handleClient();

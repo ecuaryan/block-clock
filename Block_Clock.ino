@@ -114,6 +114,7 @@ char deviceId[DEVICE_ID_SIZE] = "";
 char portalApSsid[AP_SSID_SIZE] = "";
 char portalApPassword[AP_PASSWORD_SIZE] = "";
 bool portalShouldRestart = false;
+uint32_t setupHoldStartedMs = 0;  // millis() when a SETUP hold that opened setup began, for the factory-reset hold
 bool portalFactoryResetRequested = false;
 
 // While a computer is attached over USB the clock never deep-sleeps (see goToSleepForSeconds); it
@@ -132,8 +133,7 @@ static uint32_t usbWaitSeconds = 0;
 
 enum SetupBootAction : uint8_t {
   SETUP_BOOT_ACTION_NONE = 0,
-  SETUP_BOOT_ACTION_PORTAL = 1,
-  SETUP_BOOT_ACTION_FACTORY_RESET = 2,
+  SETUP_BOOT_ACTION_PORTAL = 1,  // a factory-reset hold carries on inside the portal
   SETUP_BOOT_ACTION_CYCLE = 3
 };
 
@@ -188,15 +188,20 @@ static SetupBootAction detectSetupBootAction() {
     return setupWakeRequested() ? SETUP_BOOT_ACTION_CYCLE : SETUP_BOOT_ACTION_NONE;
   }
 
+  // A quick tap flips screens, like FUNCTION does. A hold opens setup the moment it reaches
+  // SETUP_PORTAL_HOLD_MS, still held, so the screen changes as soon as the hold has counted;
+  // the portal then finishes a factory-reset hold (see runSetupPortal).
   const uint32_t start = millis();
-  while (digitalRead(PIN_SETUP_BUTTON) == LOW) {
-    if ((millis() - start) >= FACTORY_RESET_HOLD_MS) {
-      return SETUP_BOOT_ACTION_FACTORY_RESET;
+  uint8_t highPolls = 0;
+  while (highPolls < 2) {  // released = high on two polls in a row, so contact bounce never cuts a hold short
+    highPolls = digitalRead(PIN_SETUP_BUTTON) == LOW ? 0 : highPolls + 1;
+    if ((millis() - start) >= SETUP_PORTAL_HOLD_MS) {
+      setupHoldStartedMs = start;
+      return SETUP_BOOT_ACTION_PORTAL;
     }
     delay(BUTTON_POLL_DELAY_MS);
   }
-  // A deliberate hold opens setup; a quick tap flips screens, like FUNCTION does.
-  return (millis() - start) >= SETUP_PORTAL_HOLD_MS ? SETUP_BOOT_ACTION_PORTAL : SETUP_BOOT_ACTION_CYCLE;
+  return SETUP_BOOT_ACTION_CYCLE;
 }
 
 static void prepareHardware() {
@@ -388,10 +393,6 @@ static void factoryResetAndShowWelcome() {
 // One wake: from deep sleep (or power-on) via setup(), or in-process from loop() while USB keeps it awake.
 static void runWake() {
   const SetupBootAction bootAction = detectSetupBootAction();
-  if (bootAction == SETUP_BOOT_ACTION_FACTORY_RESET) {
-    factoryResetAndShowWelcome();
-    return;
-  }
 
   loadDeviceConfig(deviceConfig);
   applySecretsBootstrap(deviceConfig);
