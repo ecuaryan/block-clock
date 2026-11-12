@@ -303,6 +303,8 @@ static void drawSetupPortalReadyScreen() {
   display.print("PW:");
   display.setCursor(VALUE_X, 94);
   display.print(portalApPassword);
+  display.setCursor(LABEL_X, 114);
+  display.print("Tap square button to exit");
 #endif
 
   char qrData[96];
@@ -319,6 +321,10 @@ static void drawSetupPortalReadyScreen() {
 
 static void drawSetupSavedScreen() {
   drawBrandedStatusScreen("SETTINGS SAVED", "Restarting ", true);
+}
+
+static void drawSetupClosedScreen() {
+  drawBrandedStatusScreen("SETUP CLOSED", "Restarting ", true);
 }
 
 static void drawFactoryResetScreen() {

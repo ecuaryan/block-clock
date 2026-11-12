@@ -366,14 +366,18 @@ static bool fetchTickerQuotes(const DeviceConfig& cfg, BlockData& outData, Strin
   int status = 0;
   JsonDocument doc;
   if (!httpGetString(url.c_str(), payload, &status)) {
+    Serial.printf("[BlockClock] watchlist: HTTP %d for %s\n", status, url.c_str());
     // When none of the symbols exist Yahoo answers 404 rather than an empty object.
     if (status != 404) return false;
   } else {
     JsonDocument filter;
     for (int i = 0; i < MAX_TICKERS; i++) {
       if (!hasText(cfg.tickers[i])) continue;
-      filter[cfg.tickers[i]]["close"] = true;
-      filter[cfg.tickers[i]]["chartPreviousClose"] = true;
+      // Key by const char*: ArduinoJson takes a char array as a literal of its full size, so
+      // "MSTR" padded to the buffer would never match Yahoo's "MSTR".
+      const char* symbol = cfg.tickers[i];
+      filter[symbol]["close"] = true;
+      filter[symbol]["chartPreviousClose"] = true;
     }
     if (deserializeJson(doc, payload, DeserializationOption::Filter(filter))) return false;
   }
@@ -385,7 +389,7 @@ static bool fetchTickerQuotes(const DeviceConfig& cfg, BlockData& outData, Strin
       memset(&quote, 0, sizeof(quote));
       continue;
     }
-    JsonVariantConst entry = doc[cfg.tickers[i]];
+    JsonVariantConst entry = doc[(const char*)cfg.tickers[i]];  // const char* key, see the filter above
     double price = 0.0;
     JsonArrayConst closes = entry["close"].as<JsonArrayConst>();
     for (JsonVariantConst close : closes) {
@@ -405,6 +409,10 @@ static bool fetchTickerQuotes(const DeviceConfig& cfg, BlockData& outData, Strin
     safeCopyCString(quote.symbol, sizeof(quote.symbol), cfg.tickers[i]);
     quote.price = price;
     quote.changePct = previousClose > 0.0 ? (float)((price / previousClose - 1.0) * 100.0) : NAN;
+  }
+  if (!gotPrice) {
+    Serial.printf("[BlockClock] watchlist: no prices (HTTP %d, %u bytes): %.200s\n",
+                  status, (unsigned)payload.length(), payload.c_str());
   }
   const time_t now = time(nullptr);
   if (gotPrice && now >= 1700000000) outData.tickersUpdatedAt = now;

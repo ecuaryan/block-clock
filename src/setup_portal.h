@@ -1,5 +1,10 @@
 #pragma once
 
+// millis() of the last request from a phone or computer on the setup page; setup closes after
+// CONFIG_PORTAL_IDLE_TIMEOUT_MS without one.
+static uint32_t portalLastActivityMs = 0;
+static void notePortalActivity() { portalLastActivityMs = millis(); }
+
 // Persisted across the post-save restart so the next boot can immediately draw a
 // pending dashboard with placeholders (Freedom Clock parity). Without this the
 // e-ink keeps the "SETTINGS SAVED" image visible during the entire WiFi+fetch
@@ -70,29 +75,33 @@ static void appendPortalBrandHeader(String& html) {
 // so this is a fixed list of popular Yahoo symbols; any other symbol can still be typed.
 static const char PORTAL_TICKER_SUGGESTIONS[] PROGMEM =
   "<datalist id=\"ticker_suggestions\">"
-  "<option value=\"BTC-USD\">Bitcoin</option><option value=\"ETH-USD\">Ether</option>"
-  "<option value=\"SOL-USD\">Solana</option><option value=\"XRP-USD\">XRP</option>"
-  "<option value=\"DOGE-USD\">Dogecoin</option><option value=\"MSTR\">Strategy</option>"
-  "<option value=\"COIN\">Coinbase</option><option value=\"MARA\">MARA Holdings</option>"
-  "<option value=\"RIOT\">Riot Platforms</option><option value=\"IBIT\">iShares Bitcoin Trust</option>"
+  "<option value=\"MSTR\">Strategy</option><option value=\"STRK\">Strategy preferred (Strike)</option>"
+  "<option value=\"STRF\">Strategy preferred (Strife)</option><option value=\"ASST\">Strive</option>"
+  "<option value=\"SATA\">Strive preferred</option><option value=\"MTPLF\">Metaplanet</option>"
+  "<option value=\"COIN\">Coinbase</option><option value=\"HOOD\">Robinhood</option>"
+  "<option value=\"XYZ\">Block</option><option value=\"MARA\">MARA Holdings</option>"
+  "<option value=\"RIOT\">Riot Platforms</option><option value=\"CLSK\">CleanSpark</option>"
+  "<option value=\"HUT\">Hut 8</option><option value=\"IREN\">IREN</option>"
+  "<option value=\"CORZ\">Core Scientific</option><option value=\"IBIT\">iShares Bitcoin Trust</option>"
+  "<option value=\"FBTC\">Fidelity Bitcoin Fund</option><option value=\"GBTC\">Grayscale Bitcoin Trust</option>"
   "<option value=\"AAPL\">Apple</option><option value=\"NVDA\">Nvidia</option>"
   "<option value=\"TSLA\">Tesla</option><option value=\"MSFT\">Microsoft</option>"
   "<option value=\"AMZN\">Amazon</option><option value=\"GOOGL\">Alphabet (Google)</option>"
-  "<option value=\"META\">Meta</option><option value=\"SPY\">S&amp;P 500 ETF</option>"
-  "<option value=\"QQQ\">Nasdaq 100 ETF</option><option value=\"^GSPC\">S&amp;P 500 index</option>"
-  "<option value=\"^IXIC\">Nasdaq Composite</option><option value=\"^DJI\">Dow Jones</option>"
-  "<option value=\"^RUT\">Russell 2000</option><option value=\"^VIX\">VIX volatility</option>"
-  "<option value=\"^TNX\">10-year Treasury yield</option><option value=\"GC=F\">Gold</option>"
-  "<option value=\"SI=F\">Silver</option><option value=\"CL=F\">Crude oil</option>"
-  "<option value=\"DX-Y.NYB\">US dollar index</option><option value=\"EURUSD=X\">Euro / US dollar</option>"
-  "<option value=\"GBPUSD=X\">Pound / US dollar</option><option value=\"JPY=X\">US dollar / yen</option>"
+  "<option value=\"META\">Meta</option><option value=\"NFLX\">Netflix</option>"
+  "<option value=\"AVGO\">Broadcom</option><option value=\"BRK-B\">Berkshire Hathaway</option>"
+  "<option value=\"SPY\">S&amp;P 500 ETF</option><option value=\"VOO\">Vanguard S&amp;P 500 ETF</option>"
+  "<option value=\"QQQ\">Nasdaq 100 ETF</option><option value=\"DIA\">Dow Jones ETF</option>"
+  "<option value=\"IWM\">Russell 2000 ETF</option><option value=\"^GSPC\">S&amp;P 500 index</option>"
+  "<option value=\"^IXIC\">Nasdaq Composite</option><option value=\"^DJI\">Dow Jones index</option>"
+  "<option value=\"^VIX\">VIX volatility</option><option value=\"^TNX\">10-year Treasury yield</option>"
+  "<option value=\"GC=F\">Gold</option><option value=\"DX-Y.NYB\">US dollar index</option>"
   "</datalist>";
 
 static String portalPage() {
   String html;
   const RefreshIntervalUnit refreshUnit = preferredRefreshIntervalUnit(deviceConfig.refreshIntervalMinutes);
   const uint16_t refreshValue = refreshIntervalDisplayValue(deviceConfig.refreshIntervalMinutes, refreshUnit);
-  html.reserve(28000);
+  html.reserve(30000);
   html += F("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
   html += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
   html += F("<title>BLOCK CLOCK</title>");
@@ -113,6 +122,9 @@ static String portalPage() {
   html += F(".stack{display:grid;gap:14px;}");
   html += F(".tickers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}.tickers input{text-transform:uppercase;}");
   html += F("@media(max-width:480px){.tickers{grid-template-columns:repeat(2,minmax(0,1fr));}}");
+  // Ticker suggestions drawn by the page itself: phones' setup-Wi-Fi sign-in sheets ignore <datalist>.
+  html += F(".tk{position:relative;}.suggest{position:absolute;top:100%;margin-top:4px;z-index:50;width:max(100%,210px);background:#fff;border:1px solid #ded4c2;border-radius:12px;box-shadow:0 10px 26px rgba(18,18,18,.16);overflow:hidden;}");
+  html += F(".suggest button{display:flex;gap:8px;width:100%;text-align:left;border-radius:0;background:#fff;color:#171717;padding:10px 12px;font-size:15px;font-weight:400;}.suggest button+button{border-top:1px solid #f0ebe1;}.suggest button:active{background:#fdf1e1;}.suggest span{color:#6b6257;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
   html += F(".inline{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;}.inline select{flex:1;min-width:160px;}");
   html += F("label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:#3a342d;}");
   html += F("input,select{width:100%;box-sizing:border-box;min-height:44px;height:44px;padding:10px 12px;border:1px solid #cfc6b7;border-radius:12px;font-size:16px;line-height:1.2;background:#fdfbf6;color:#171717;}");
@@ -141,7 +153,7 @@ static String portalPage() {
   html += F("<div class=\"wrap\">");
   html += F("<section class=\"hero\">");
   appendPortalBrandHeader(html);
-  html += F("<p>To get back here, hold SETUP (the square button) for 3 seconds. Holding it for about 10 seconds clears all settings (factory reset).</p>");
+  html += F("<p>To get back here, tap the square button on the clock. Tapping it again, or leaving this page for 10 minutes, closes setup without saving.</p>");
   html += F("</section>");
   html += F("<form id=\"setup_form\" method=\"post\" action=\"/save\">");
 
@@ -275,13 +287,13 @@ static String portalPage() {
   html += F(">Show my tickers</option></select><div class=\"hint\">Adds a fourth screen with the price and day change of up to six tickers.</div></div>");
   html += F("<div id=\"ticker_fields\"><div class=\"tickers\">");
   for (int i = 0; i < MAX_TICKERS; i++) {
-    html += F("<input name=\"ticker");
+    html += F("<div class=\"tk\"><input name=\"ticker");
     html += String(i);
-    html += F("\" list=\"ticker_suggestions\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"Ticker ");
+    html += F("\" maxlength=\"12\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"Ticker ");
     html += String(i + 1);
     html += F("\" value=\"");
     html += htmlEscape(deviceConfig.tickers[i]);
-    html += F("\">");
+    html += F("\"></div>");
   }
   html += F("</div>");
   html += FPSTR(PORTAL_TICKER_SUGGESTIONS);
@@ -320,13 +332,22 @@ static String portalPage() {
   html += F("</section>");
 
   html += F("<div class=\"actions\"><button id=\"save_button\" type=\"submit\">Save</button></div>");
-  html += F("</form><script>");
+  html += F("</form>");
+  html += F("<section class=\"card\"><h2>Factory reset</h2><div class=\"hint\">Clears every setting, including Wi-Fi, and returns the clock to its welcome screen.</div>");
+  html += F("<div class=\"actions\"><button id=\"factory_reset\" class=\"secondary\" type=\"button\">Factory reset</button></div></section>");
+  html += F("<script>");
 
   // ── Data source visibility ─────────────────────────────────────────────────
   html += F("(function(){var source=document.getElementById('data_source');var mqtt=document.getElementById('mqtt_settings');function sync(){if(!source||!mqtt)return;mqtt.classList.toggle('hidden',source.value!=='mqtt');}if(source)source.addEventListener('change',sync);sync();})();");
 
   // ── Rotate / watchlist visibility ─────────────────────────────────────────
   html += F("(function(){function link(selectId,targetId){var sel=document.getElementById(selectId);var target=document.getElementById(targetId);function sync(){if(sel&&target)target.classList.toggle('hidden',sel.value!=='1');}if(sel)sel.addEventListener('change',sync);sync();}link('quiet_hours','quiet_times');link('rotate_screens','rotate_every');link('watchlist','ticker_fields');})();");
+
+  html += F("(function(){var dl=document.getElementById('ticker_suggestions');if(!dl)return;var opts=[].map.call(dl.options,function(o){return [o.value,o.textContent];});var box=document.createElement('div');box.className='suggest hidden';function hide(){box.classList.add('hidden');}");
+  html += F("function show(inp){var q=inp.value.trim().toUpperCase();var m=opts.filter(function(o){return !q||o[0].indexOf(q)===0||o[1].toUpperCase().indexOf(q)>=0;});if(m.length===1&&m[0][0]===q)m=[];m=m.slice(0,6);if(!m.length){hide();return;}box.innerHTML='';");
+  html += F("m.forEach(function(o){var b=document.createElement('button');b.type='button';b.appendChild(document.createElement('b')).textContent=o[0];b.appendChild(document.createElement('span')).textContent=o[1];b.addEventListener('mousedown',function(e){e.preventDefault();});b.addEventListener('click',function(){inp.value=o[0];hide();});box.appendChild(b);});");
+  html += F("inp.parentNode.appendChild(box);box.style.left='0';box.style.right='auto';box.classList.remove('hidden');if(box.getBoundingClientRect().right>window.innerWidth-8){box.style.left='auto';box.style.right='0';}}");
+  html += F("[].forEach.call(document.querySelectorAll('.tickers input'),function(inp){inp.addEventListener('input',function(){show(inp);});inp.addEventListener('focus',function(){show(inp);});inp.addEventListener('blur',function(){setTimeout(function(){if(document.activeElement!==inp&&box.parentNode===inp.parentNode)hide();},150);});inp.addEventListener('keydown',function(e){if(e.key==='Escape'||e.key==='Enter')hide();});});})();");
 
   // ── Save overlay ───────────────────────────────────────────────────────────
   html += F("(function(){var form=document.getElementById('setup_form');var saveButton=document.getElementById('save_button');var overlay=document.getElementById('save_overlay');var overlayText=document.getElementById('save_overlay_text');var overlaySpinner=document.getElementById('save_overlay_spinner');var overlayAction=document.getElementById('save_overlay_action');var overlayConfirm=document.getElementById('save_overlay_confirm');var saveInFlight=false;var pendingBody=null;");
@@ -340,6 +361,7 @@ static String portalPage() {
   html += F("function askOverlay(text){failOverlay(text);if(overlayAction)overlayAction.textContent='Go back';if(overlayConfirm)overlayConfirm.classList.remove('hidden');}");
   html += F("function save(body,checks){showOverlay('Saving settings...');return fetch('/save',{method:'POST',headers:headers,body:body,cache:'no-store'}).then(function(r){return r.json();}).then(function(saved){if(!saved||!saved.ok){failOverlay((saved&&saved.error)||'Save failed.');return;}showOverlayHtml('Settings saved!'+(checks?'<br><span style=\\'font-weight:400;font-size:15px\\'>'+escapeHtml(checks).replace(/\\n/g,'<br>')+'</span>':'')+'<br>Device is restarting...');});}");
   html += F("function lostConnection(){failOverlay('Settings check failed.\\nReconnect to BLOCK CLOCK setup Wi-Fi and try again.');}");
+  html += F("var resetButton=document.getElementById('factory_reset');if(resetButton)resetButton.addEventListener('click',function(){if(saveInFlight||!confirm('Clear all settings, including Wi-Fi? The clock goes back to its welcome screen.'))return;saveInFlight=true;showOverlay('Clearing settings...');fetch('/factory-reset',{method:'POST',headers:headers,body:'confirm=1',cache:'no-store'}).then(function(r){return r.json();}).then(function(){showOverlayHtml('Settings cleared.<br>The clock is restarting.');}).catch(function(){failOverlay('Could not reach the clock.\\nReconnect to its setup Wi-Fi and try again.');});});");
   html += F("if(overlayAction)overlayAction.addEventListener('click',hideOverlay);");
   html += F("if(overlayConfirm)overlayConfirm.addEventListener('click',function(){if(!pendingBody)return;saveInFlight=true;if(saveButton)saveButton.disabled=true;save(pendingBody).catch(lostConnection);});");
   html += F("if(!form)return;");
@@ -388,6 +410,7 @@ static String portalPage() {
 }
 
 static void handlePortalRoot() {
+  notePortalActivity();
   portalServer.send(200, "text/html", portalPage());
 }
 
@@ -455,6 +478,7 @@ static void scanForNetworks(const DeviceConfig& cfg, bool& primaryInRange, bool&
 }
 
 static void portalSendWifiResult(const String& status, const String& warning) {
+  notePortalActivity();  // the Wi-Fi checks can take a while; count from when they finish
   if (warning.length()) portalSendJson(true, (warning + F("\n\nSave anyway?")).c_str(), true);
   else portalSendJson(true, status.c_str());
 }
@@ -463,6 +487,7 @@ static void portalSendWifiResult(const String& status, const String& warning) {
 // home on the backup alone. A network that is in range but refuses to connect is usually a wrong
 // password, so the page asks before saving rather than letting the owner find out on the road.
 static void handlePortalValidate() {
+  notePortalActivity();
   DeviceConfig submitted = deviceConfig;
   loadSubmittedPortalConfig(submitted);
   submitted.configured = true;
@@ -487,7 +512,7 @@ static void handlePortalValidate() {
     }
   }
   if (submitted.watchlistEnabled && tickerCount(submitted) == 0) {
-    portalSendJson(false, "Watchlist: no tickers\nAdd at least one ticker, such as MSTR or ETH-USD, or turn the watchlist off.");
+    portalSendJson(false, "Watchlist: no tickers\nAdd at least one ticker, such as MSTR or IBIT, or turn the watchlist off.");
     return;
   }
 
@@ -535,7 +560,7 @@ static void handlePortalValidate() {
     BlockData scratch = {};
     String unknown;
     if (fetchTickerQuotes(submitted, scratch, &unknown) && unknown.length()) {
-      String message = wifiStatus + F("\nWatchlist: not found\nYahoo Finance does not know ") + unknown + F(". Check the spelling, e.g. ETH-USD for Ether.");
+      String message = wifiStatus + F("\nWatchlist: not found\nYahoo Finance does not know ") + unknown + F(". Check the spelling on finance.yahoo.com, e.g. ^GSPC for the S&P 500.");
       portalSendJson(false, message.c_str());
       return;
     }
@@ -562,13 +587,14 @@ static void handlePortalValidate() {
 }
 
 static void handlePortalSave() {
+  notePortalActivity();
   DeviceConfig cfg = deviceConfig;
   loadSubmittedPortalConfig(cfg);
   cfg.configured = true;
   normalizeDeviceConfig(cfg);
 
   if (!saveDeviceConfig(cfg)) {
-    portalServer.send(200, "application/json", F("{\"ok\":false,\"error\":\"Could not write settings to storage. Try again or factory reset (hold SETUP 10 s).\"}"));
+    portalServer.send(200, "application/json", F("{\"ok\":false,\"error\":\"Could not write settings to storage. Try again, or use Factory reset at the bottom of this page.\"}"));
     return;
   }
   deviceConfig = cfg;
@@ -579,6 +605,7 @@ static void handlePortalSave() {
 }
 
 static void handlePortalWifiList() {
+  notePortalActivity();
   String json = F("{\"ok\":true,\"networks\":[");
   bool first = true;
 
@@ -618,12 +645,21 @@ static void handlePortalWifiList() {
 }
 
 static void handlePortalRedirect() {
+  notePortalActivity();
   portalServer.sendHeader("Location", String("http://") + CONFIG_AP_IP.toString(), true);
   portalServer.send(302, "text/plain", "");
 }
 
+static void handlePortalFactoryReset() {
+  notePortalActivity();
+  portalServer.send(200, "application/json", F("{\"ok\":true}"));
+  portalFactoryResetRequested = true;
+  portalShouldRestart = true;
+}
+
 static void startPortalServers() {
   portalServer.on("/", HTTP_GET, handlePortalRoot);
+  portalServer.on("/factory-reset", HTTP_POST, handlePortalFactoryReset);
   portalServer.on("/validate", HTTP_POST, handlePortalValidate);
   portalServer.on("/save", HTTP_POST, handlePortalSave);
   portalServer.on("/wifi-list", HTTP_GET, handlePortalWifiList);
@@ -633,6 +669,46 @@ static void startPortalServers() {
   portalServer.on("/ncsi.txt", HTTP_GET, handlePortalRedirect);
   portalServer.onNotFound(handlePortalRedirect);
   portalServer.begin();
+}
+
+// A clock button as setup sees it: a press counts once it has been let go for BUTTON_RELEASE_MS,
+// and the press that opened setup never counts as a tap.
+struct PortalButton {
+  uint8_t pin;
+  bool down;
+  bool countsAsTap;
+  uint32_t downAtMs;
+  uint32_t lastLowMs;
+};
+
+static void beginPortalButton(PortalButton& b, uint8_t pin, uint32_t downAtMs) {
+  b.pin = pin;
+  b.down = digitalRead(pin) == LOW;
+  b.countsAsTap = false;
+  b.downAtMs = downAtMs;
+  b.lastLowMs = millis();
+}
+
+// Returns true on the release that ends a tap.
+static bool updatePortalButton(PortalButton& b, uint32_t nowMs) {
+  if (digitalRead(b.pin) == LOW) {
+    b.lastLowMs = nowMs;
+    if (!b.down) {
+      b.down = true;
+      b.countsAsTap = true;
+      b.downAtMs = nowMs;
+    }
+    return false;
+  }
+  if (!b.down || (nowMs - b.lastLowMs) < BUTTON_RELEASE_MS) return false;
+  b.down = false;
+  return b.countsAsTap;
+}
+
+static void stopPortalNetwork() {
+  portalServer.stop();
+  portalDnsServer.stop();
+  WiFi.softAPdisconnect(true);
 }
 
 static void runSetupPortal() {
@@ -646,32 +722,56 @@ static void runSetupPortal() {
   portalDnsServer.start(CONFIG_DNS_PORT, "*", CONFIG_AP_IP);
   startPortalServers();
   drawSetupPortalReadyScreen();
+  notePortalActivity();
 
-  // A SETUP hold that opened setup keeps counting toward a factory reset from when it began.
-  bool factoryResetHoldActive = digitalRead(PIN_SETUP_BUTTON) == LOW && setupHoldStartedMs != 0;
-  uint32_t factoryResetHoldStartedMs = setupHoldStartedMs;
+  // A tap on either button closes setup without saving. Holding SETUP about 10 s factory-resets,
+  // counting from the press that opened setup if it is still held.
+  const uint32_t openedMs = millis();
+  PortalButton setupButton;
+  PortalButton functionButton;
+  beginPortalButton(setupButton, PIN_SETUP_BUTTON, setupHoldStartedMs != 0 ? setupHoldStartedMs : openedMs);
+  beginPortalButton(functionButton, PIN_FUNCTION_BUTTON, openedMs);
   setupHoldStartedMs = 0;
-  while (!portalShouldRestart) {
+  bool closeRequested = false;
+  while (!portalShouldRestart && !closeRequested) {
     portalDnsServer.processNextRequest();
     portalServer.handleClient();
-    if (digitalRead(PIN_SETUP_BUTTON) == LOW) {
-      if (!factoryResetHoldActive) {
-        factoryResetHoldActive = true;
-        factoryResetHoldStartedMs = millis();
-      } else if ((millis() - factoryResetHoldStartedMs) >= FACTORY_RESET_HOLD_MS) {
-        portalFactoryResetRequested = true;
-        portalShouldRestart = true;
-      }
-    } else {
-      factoryResetHoldActive = false;
+    const uint32_t nowMs = millis();
+    if (updatePortalButton(setupButton, nowMs) || updatePortalButton(functionButton, nowMs)) {
+      Serial.println("[BlockClock] setup closed by a button tap");
+      closeRequested = true;
+    } else if (setupButton.down && (nowMs - setupButton.downAtMs) >= FACTORY_RESET_HOLD_MS) {
+      portalFactoryResetRequested = true;
+      portalShouldRestart = true;
+    } else if ((nowMs - portalLastActivityMs) >= CONFIG_PORTAL_IDLE_TIMEOUT_MS) {
+      Serial.println("[BlockClock] setup closed after 10 idle minutes");
+      closeRequested = true;
     }
     delay(CONFIG_PORTAL_DELAY_MS);
   }
 
+  if (closeRequested) {
+    stopPortalNetwork();
+    if (!deviceConfig.configured) {
+      // Nothing to show yet: back to the welcome screen, which waits for a button.
+      drawWelcomeScreen();
+      goToWelcomeSleep();
+      return;
+    }
+    drawSetupClosedScreen();
+    setPostSaveRestartPending(true);  // the restart draws loading placeholders right away, as after a save
+    delay(CONFIG_PORTAL_RESTART_DELAY_MS);
+    ESP.restart();
+  }
+
   if (portalFactoryResetRequested) {
-    portalServer.stop();
-    portalDnsServer.stop();
-    WiFi.softAPdisconnect(true);
+    // Let a factory-reset request's response reach the browser before the AP goes away.
+    const uint32_t flushStart = millis();
+    while ((millis() - flushStart) < 500) {
+      portalServer.handleClient();
+      delay(CONFIG_PORTAL_DELAY_MS);
+    }
+    stopPortalNetwork();
     factoryResetAndShowWelcome();
     return;
   }
@@ -684,9 +784,7 @@ static void runSetupPortal() {
     delay(CONFIG_PORTAL_DELAY_MS);
   }
 
-  portalServer.stop();
-  portalDnsServer.stop();
-  WiFi.softAPdisconnect(true);
+  stopPortalNetwork();
 
   drawSetupSavedScreen();
   delay(CONFIG_PORTAL_RESTART_DELAY_MS);

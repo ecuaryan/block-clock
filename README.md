@@ -88,7 +88,7 @@ The setup page lets you configure:
 
 - Wi-Fi network and password, plus an optional backup network (for example a phone hotspot). The clock tries the network that worked last, then the other; if neither is reachable it retries every 15 minutes at most, however long the refresh interval is. Settings save as long as one of the two connects, so you can set the clock up on the hotspot alone; if a network is in range but refuses the password, the page asks before saving
 - Auto-rotate: flip to the next screen on a timer (every 15 seconds to 12 hours) between data refreshes. It pauses during quiet hours
-- Watchlist: up to six [Yahoo Finance](https://finance.yahoo.com) symbols, such as `MSTR`, `AAPL`, `ETH-USD`, `^GSPC` (S&P 500) or `GC=F` (gold), shown on a fourth screen. The setup page checks that each symbol exists. Prices come from Yahoo Finance in both data modes
+- Watchlist: up to six [Yahoo Finance](https://finance.yahoo.com) symbols, such as `MSTR`, `IBIT`, `AAPL`, `^GSPC` (S&P 500) or `GC=F` (gold), shown on a fourth screen. Bitcoin itself is on the Price screen. The setup page suggests common symbols as you type, Bitcoin companies first. The setup page checks that each symbol exists. Prices come from Yahoo Finance in both data modes
 - Data source: online or MQTT
 - Currency: USD, EUR, CHF, GBP, CAD, or AUD
 - Refresh interval
@@ -96,20 +96,25 @@ The setup page lets you configure:
 - Battery percentage display
 - MQTT server, port, credentials, and topics
 
-When settings are saved, the e-ink display shows a saved screen and the device restarts.
+When settings are saved, the e-ink display shows a saved screen and the device restarts. To change settings later, tap the square (`SETUP`) button.
 
 There is no setup PIN. Block Clock does not store personal financial data.
 
 ## Buttons
 
-- `FUNCTION` (`GPIO21`): a quick tap while the clock is asleep flips to the next screen (Price, Network, Supply, and Watchlist when it is on) from the last fetched data, with no network wait. Hold for about 1.5 seconds to fetch fresh data instead.
-- `SETUP` (`BOOT / GPIO0`): a quick tap flips screens too, so either button works for browsing. Hold for about 3 seconds to enter setup mode: the setup screen appears as soon as the 3 seconds are up, while you are still holding. Keep holding to about 10 seconds to factory reset — the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
+Every button does one thing, with a single tap. The printed case marks them with icons:
+
+| Button | On the case | Tap |
+|---|---|---|
+| `FUNCTION` (`GPIO21`) | X | Next screen (Price, Network, Supply, and Watchlist when it is on), from the last fetched data with no network wait |
+| `SETUP` (`BOOT / GPIO0`) | Square | Open setup. In setup, a tap on either button closes it without saving; it also closes itself after 10 minutes with no activity on the page |
+| `HOME` (RST) | Ring | Restart: fetches fresh data and returns to the Price screen |
+
+Factory reset is a button at the bottom of the setup page. As a fallback when the page cannot be reached, holding `SETUP` for about 10 seconds also factory resets: the device shows a reset screen, clears all saved settings, and returns to the welcome screen.
 
 The clock stays on the screen you picked when it refreshes on its timer.
 
 **Quiet hours** (optional, in the setup portal) pause timer refreshes overnight so the screen is not redrawing while nobody is looking. A button press during quiet hours still fetches live data. Every screen shows `next h:mm AM/PM` in the footer, the time of the next planned refresh; if the clock is past that time, it is stuck.
-
-On the printed case the buttons carry icons: the square frame is `SETUP`, the X is `FUNCTION`, and the ring is `HOME` (RST). `HOME` reboots the clock: it clears the saved state, fetches fresh data, and returns to the Price screen.
 
 Avoid holding `SETUP` while pressing `HOME` (RST); on ESP32 boards that combination can enter the bootloader used for flashing firmware.
 

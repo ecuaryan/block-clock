@@ -114,7 +114,7 @@ char deviceId[DEVICE_ID_SIZE] = "";
 char portalApSsid[AP_SSID_SIZE] = "";
 char portalApPassword[AP_PASSWORD_SIZE] = "";
 bool portalShouldRestart = false;
-uint32_t setupHoldStartedMs = 0;  // millis() when a SETUP hold that opened setup began, for the factory-reset hold
+uint32_t setupHoldStartedMs = 0;  // millis() when the SETUP press that opened setup began (0 if already let go), for the factory-reset hold
 bool portalFactoryResetRequested = false;
 
 // While a computer is attached over USB the clock never deep-sleeps (see goToSleepForSeconds); it
@@ -133,14 +133,14 @@ static uint32_t usbWaitSeconds = 0;
 
 enum SetupBootAction : uint8_t {
   SETUP_BOOT_ACTION_NONE = 0,
-  SETUP_BOOT_ACTION_PORTAL = 1,  // a factory-reset hold carries on inside the portal
-  SETUP_BOOT_ACTION_CYCLE = 3
+  SETUP_BOOT_ACTION_PORTAL = 1  // a factory-reset hold carries on inside the portal
 };
 
 #include "src/config_runtime.h"
 #include "src/display_screens.h"
 #include "src/block_data.h"
 static void factoryResetAndShowWelcome();
+static void goToWelcomeSleep();
 #include "src/setup_portal.h"
 
 static bool setupButtonPressed() {
@@ -181,27 +181,15 @@ static bool setupWakeRequested() {
   return wasSetupButtonWake();
 }
 
+// Any SETUP press opens setup, however short: a tap only needs the switch to click, never a steady
+// hold. Waking from deep sleep takes a moment, so the button may already be up; the wake source counts too.
 static SetupBootAction detectSetupBootAction() {
   pinMode(PIN_SETUP_BUTTON, INPUT_PULLUP);
   delay(BUTTON_POLL_DELAY_MS);
-  if (digitalRead(PIN_SETUP_BUTTON) != LOW) {
-    return setupWakeRequested() ? SETUP_BOOT_ACTION_CYCLE : SETUP_BOOT_ACTION_NONE;
-  }
-
-  // A quick tap flips screens, like FUNCTION does. A hold opens setup the moment it reaches
-  // SETUP_PORTAL_HOLD_MS, still held, so the screen changes as soon as the hold has counted;
-  // the portal then finishes a factory-reset hold (see runSetupPortal).
-  const uint32_t start = millis();
-  uint8_t highPolls = 0;
-  while (highPolls < 2) {  // released = high on two polls in a row, so contact bounce never cuts a hold short
-    highPolls = digitalRead(PIN_SETUP_BUTTON) == LOW ? 0 : highPolls + 1;
-    if ((millis() - start) >= SETUP_PORTAL_HOLD_MS) {
-      setupHoldStartedMs = start;
-      return SETUP_BOOT_ACTION_PORTAL;
-    }
-    delay(BUTTON_POLL_DELAY_MS);
-  }
-  return SETUP_BOOT_ACTION_CYCLE;
+  const bool stillDown = digitalRead(PIN_SETUP_BUTTON) == LOW;
+  if (!stillDown && !setupWakeRequested()) return SETUP_BOOT_ACTION_NONE;
+  setupHoldStartedMs = stillDown ? millis() : 0;
+  return SETUP_BOOT_ACTION_PORTAL;
 }
 
 static void prepareHardware() {
@@ -287,15 +275,6 @@ static uint32_t secondsUntilNextRefresh() {
   if (now < 1700000000 || rtcLastKnownUnixTime < 1700000000 || now < rtcLastKnownUnixTime) return skipQuietHours(deviceConfig, interval);
   const uint32_t elapsed = (uint32_t)(now - rtcLastKnownUnixTime);
   return skipQuietHours(deviceConfig, elapsed + 5 >= interval ? 5 : interval - elapsed);
-}
-
-static bool functionButtonHeld(uint32_t holdMs) {
-  const uint32_t start = millis();
-  while (digitalRead(PIN_FUNCTION_BUTTON) == LOW) {
-    if ((millis() - start) >= holdMs) return true;
-    delay(BUTTON_POLL_DELAY_MS);
-  }
-  return false;
 }
 
 static void advanceScreen() {
@@ -416,7 +395,7 @@ static void runWake() {
   const uint8_t screenBeforeWake = rtcScreenIndex;
   const esp_reset_reason_t resetReason = esp_reset_reason();
   const bool functionWake = wasFunctionButtonWake();
-  const bool manualWake = functionWake || bootAction == SETUP_BOOT_ACTION_CYCLE;
+  const bool manualWake = functionWake;
   // Mirror Freedom Clock: hardware-reset / power-on / brownout (wake cause undefined
   // and reset reason not "SW restart") with a configured device is a "user is
   // looking at the screen waiting for data" event. Without this case, HW-reset
@@ -443,14 +422,12 @@ static void runWake() {
   rtcBatteryVoltage = batteryVoltage;
   rtcBatteryPercent = batteryPercent;
 
-  // A quick tap on FUNCTION or SETUP flips screens from cache; holding FUNCTION falls through to a full refresh.
+  // A FUNCTION tap flips to the next screen from cache (HOME/RST is the way to fetch fresh data now).
   // During quiet hours a tap means someone is looking, so it fetches live data instead of flipping from a stale cache.
   const bool quietTap = manualWake && nowIsQuiet(deviceConfig);
-  if (quietTap && !functionWake) {
+  if (quietTap) {
     advanceScreen();
-  } else if (quietTap) {
-    if (!functionButtonHeld(FUNCTION_LONG_PRESS_MS)) advanceScreen();
-  } else if (manualWake && rtcHasBlockData && !(functionWake && functionButtonHeld(FUNCTION_LONG_PRESS_MS))) {
+  } else if (manualWake && rtcHasBlockData) {
     showNextScreenAndSleep(batteryVoltage, batteryPercent);
     return;
   }

@@ -355,7 +355,7 @@ static BlockData demoData() {
   data.wifiOk = true;
   data.dataOk = true;
   const struct { const char* symbol; double price; float change; } quotes[] = {
-    { "MSTR", 122.35, 1.06f }, { "ETH-USD", 2075.34, 1.20f }, { "AAPL", 355.63, -0.42f },
+    { "MSTR", 122.35, 1.06f }, { "IBIT", 42.24, 1.20f }, { "AAPL", 355.63, -0.42f },
     { "^GSPC", 6891.2, 0.31f }, { "GC=F", 4012.5, -1.18f }, { "SOL-USD", 0.5123, 3.4f },
   };
   for (int i = 0; i < MAX_TICKERS; i++) {
