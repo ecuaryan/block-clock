@@ -266,7 +266,8 @@ static void buildMqttClientId(char* dst, size_t dstSize) {
 }
 
 // Upper-cases a ticker and drops anything Yahoo symbols never contain, so stray spaces, a "$" or
-// lower case typed on a phone still work; "BTC/USD" or "btc usd" become Yahoo's "BTC-USD".
+// lower case typed on a phone still work; "BTC/USD" or "btc usd" become Yahoo's "BTC-USD" and
+// ".SPX" becomes "^SPX".
 static void sanitizeTickerSymbol(char* symbol, size_t size) {
   size_t out = 0;
   bool dashPending = false;
@@ -283,6 +284,8 @@ static void sanitizeTickerSymbol(char* symbol, size_t size) {
     symbol[out++] = c;
   }
   symbol[out] = '\0';
+  // Many sites write indices with a leading dot (.SPX, .IXIC); Yahoo uses a caret (^SPX, ^IXIC).
+  if (symbol[0] == '.') symbol[0] = '^';
 }
 
 static int tickerCount(const DeviceConfig& cfg) {
